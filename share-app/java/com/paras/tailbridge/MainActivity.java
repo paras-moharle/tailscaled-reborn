@@ -59,6 +59,9 @@ public class MainActivity extends Activity {
 
 	private final Handler ui = new Handler(Looper.getMainLooper());
 
+	/** The supervisor's state line in the daemon group, updated on every poll. */
+	private TextView supervisorSub;
+
 	/** Wakes the peer list when wifi or mobile data flips, so a toggle reflects
 	 *  online/offline without restarting the app. */
 	private ConnectivityManager.NetworkCallback networkCallback;
@@ -896,6 +899,7 @@ public class MainActivity extends Activity {
 		updateRow = null;
 		updateTitle = null;
 		updateSub = null;
+		supervisorSub = null;
 
 		android.widget.ScrollView sc = findViewById(R.id.scrollSend);
 		sc.setFillViewport(true);
@@ -984,6 +988,11 @@ public class MainActivity extends Activity {
 		return st != null && "running".equals(st.optString("daemon", ""));
 	}
 
+	/** Whether the module's supervisor is alive. */
+	private static boolean supervisorUp(JSONObject st) {
+		return st != null && "running".equals(st.optString("supervisor", ""));
+	}
+
 	/** Fully authenticated: the only state where peers are reachable. */
 	private static boolean signedIn(JSONObject st) {
 		return st != null && "Running".equals(st.optString("backend", ""));
@@ -1005,6 +1014,15 @@ public class MainActivity extends Activity {
 			statusView.setText(getString(R.string.stopped));
 		} else {
 			statusView.setText(getString(R.string.connecting));
+		}
+
+		// The supervisor's state changes on its own -- it restarts the daemon
+		// when the daemon dies -- so the line has to follow the poll rather
+		// than being fixed when the screen was drawn.
+		if (supervisorSub != null) {
+			supervisorSub.setText(supervisorUp(st)
+					? getString(R.string.supervisor_running)
+					: getString(R.string.supervisor_stopped));
 		}
 
 		// "localhost" is what tailscaled calls an unauthenticated node; showing
@@ -1273,6 +1291,16 @@ public class MainActivity extends Activity {
 				getString(R.string.service_sub), daemonUp(status),
 				v -> service(v.isChecked() ? "start" : "stop"));
 		action(d, getString(R.string.restart), null, v -> service("restart"));
+		// The supervisor is the thing that puts the daemon back when it dies.
+		// Showing whether it is alive is the difference between "the module
+		// is broken" and "the module was working, and then something killed
+		// the daemon and the supervisor went with it".
+		View supRow = action(d, getString(R.string.supervisor),
+				supervisorUp(status)
+						? getString(R.string.supervisor_running)
+						: getString(R.string.supervisor_stopped),
+				null);
+		supervisorSub = supRow.findViewById(R.id.rowSub);
 		action(d, getString(R.string.console), null, v -> open(CONSOLE_URL));
 
 		updateSendButton();

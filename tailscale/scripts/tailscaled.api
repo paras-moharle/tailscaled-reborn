@@ -85,6 +85,29 @@ module_version() {
 
 # --- status -----------------------------------------------------------------
 
+# The supervisor keeps the daemon and the Taildrop receiver alive. If it is
+# gone, so is the thing that would notice a dead daemon, and the phone is one
+# crash away from having no Tailscale with nothing to say about it.
+#
+# Putting it back here means the module repairs itself whenever anything
+# looks at it -- the app polls this every few seconds, and so does any script
+# that asks the daemon how it is.
+supervisor_running() {
+	busybox pgrep -f 'keepalive.sh' >/dev/null 2>&1
+}
+
+ensure_supervisor() {
+	supervisor_running && return 0
+	# Only while the daemon is meant to be up. A daemon the user switched off
+	# does not need a supervisor, and starting one would be rude.
+	[ "$(cat "${TS_RUN_DIR}/daemon.wanted" 2>/dev/null || echo running)" = "running" ] || return 0
+	[ -f "${TS_MOD_DIR}/disable" ] && return 0
+	[ -f "${TS_SCRIPTS_DIR}/keepalive.sh" ] || return 0
+	nohup "${TS_SCRIPTS_DIR}/keepalive.sh" >>"/dev/null" 2>&1 &
+	sleep 1
+	supervisor_running
+}
+
 api_status() {
 	need_cli
 	_ver="$("$TS_BIN_DIR/tailscaled" --version 2>/dev/null | head -1 | tr -d ' \r')"
@@ -92,6 +115,10 @@ api_status() {
 
 	_daemon=stopped
 	busybox pgrep -f 'tailscaled -no-logs' >/dev/null 2>&1 && _daemon=running
+
+	ensure_supervisor
+	_supervisor=stopped
+	supervisor_running && _supervisor=running
 
 	# A stopped daemon is a normal state, not an error: the app shows a toggle
 	# for it, so report "Stopped" instead of failing the whole request.
@@ -125,6 +152,7 @@ api_status() {
 		--arg ver "$_ver" \
 		--arg mod "$(module_version)" \
 		--arg daemon "$_daemon" \
+		--arg supervisor "$_supervisor" \
 		--arg latest "$_latest" \
 		--arg feed "$_feed_state" \
 		'
@@ -133,6 +161,7 @@ api_status() {
 	  {
 	    ok: true,
 	    daemon: $daemon,
+	    supervisor: $supervisor,
 	    backend: (if $daemon == "running" then ($s.BackendState // "NoState") else "Stopped" end),
 	    version: $ver,
 	    module: $mod,

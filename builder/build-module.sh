@@ -61,6 +61,7 @@ cp "$root/tailscale/settings.sh" "$stage/tailscale/"
 cp "$root/tailscale/scripts/"*.sh "$root/tailscale/scripts/tailscaled.inotify" \
    "$root/tailscale/scripts/tailscaled.service" "$root/tailscale/scripts/tailscaled.api" \
    "$root/tailscale/scripts/tailscaled.update" "$root/tailscale/scripts/tailscaled.receive" \
+   "$root/tailscale/scripts/keepalive.sh" \
    "$stage/tailscale/scripts/" 2>/dev/null || \
 cp "$root/tailscale/scripts/"* "$stage/tailscale/scripts/"
 cp "$apk" "$stage/app/TailBridge.apk"
@@ -90,9 +91,27 @@ crlf=$(find "$stage" -type f \
 for req in module.prop customize.sh service.sh uninstall.sh \
 	   META-INF/com/google/android/update-binary \
 	   META-INF/com/google/android/updater-script \
-	   tailscale/settings.sh app/TailBridge.apk; do
+	   tailscale/settings.sh app/TailBridge.apk \
+	   tailscale/scripts/keepalive.sh \
+	   tailscale/scripts/tailscaled.service \
+	   tailscale/scripts/tailscaled.receive; do
 	[ -e "$stage/$req" ] || fail "missing $req"
 done
+
+# The boot script is the only thing that starts the daemon when the phone
+# boots. An empty or missing one means a phone with no Tailscale and no
+# complaint, which is exactly what happened when a broken install shipped a
+# zero-byte copy of it.
+[ -s "$stage/service.sh" ] || fail "service.sh is empty"
+[ -s "$stage/tailscale/scripts/keepalive.sh" ] || fail "keepalive.sh is empty"
+
+# The installer must not move the boot script into KernelSU's general
+# scripts directory: the manager app can disable a script there, and a
+# disabled one is skipped at boot with nothing to show for it.
+if grep -q 'service.d.*tailscaled_service\|tailscaled_service.sh' "$stage/customize.sh"; then
+	grep -q 'rm -f "$SERVICE_DIR/tailscaled_service.sh"' "$stage/customize.sh" ||
+		fail "customize.sh still installs into the general scripts directory"
+fi
 
 # The APK is the only interface this fork has, so an empty one is a broken zip.
 [ -s "$stage/app/TailBridge.apk" ] || fail "app APK is empty"

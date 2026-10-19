@@ -1,7 +1,7 @@
 id=paras-tailscaled
 name=Tailscaled Reborn
-version=v1.0.25
-versionCode=01000025
+version=v1.0.26
+versionCode=01000026
 author=paras-moharle
 description=Runs the Tailscale daemon on a rooted phone, with an app for sending files and a desktop integration.
 updateJson=https://raw.githubusercontent.com/paras-moharle/tailscaled-reborn/main/update.json

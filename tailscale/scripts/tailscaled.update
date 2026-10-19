@@ -220,6 +220,30 @@ cmd_check() {
 }
 
 # --------------------------------------------------------------------- run --
+#
+# The daemon must be running when any of this returns.
+#
+# An update that fails is not a rare thing: the feed can be unreachable, the
+# download can be cut short, the write can fail. What is not acceptable is an
+# update that leaves the phone with no daemon -- the symptom of which is the
+# app reporting a refused socket, with nothing in any log to say the update
+# was the reason. On a device this happened to, the update failed at boot and
+# the daemon never came up again until the next reboot.
+ensure_daemon_running() {
+	if busybox pgrep -f 'tailscaled -no-logs' >/dev/null 2>&1; then
+		return 0
+	fi
+	log Warning "The daemon is not running; starting it."
+	"${TS_SCRIPTS_DIR}/tailscaled.service" start >>"${TS_RUN_LOG_FILE}" 2>&1 || true
+	sleep 3
+	if busybox pgrep -f 'tailscaled -no-logs' >/dev/null 2>&1; then
+		log Info "The daemon is running again."
+		return 0
+	fi
+	log Error "The daemon could not be started. Check: tailscaled.service log daemon"
+	return 1
+}
+
 cmd_run() {
 	touch_stamp
 	_cur="$(current_version)"
@@ -235,6 +259,7 @@ cmd_run() {
 	if ! _fetch_new_binary; then
 		log Error "Could not obtain the new binary; keeping ${_cur}."
 		write_state "failed-update"
+		ensure_daemon_running || true
 		return 1
 	fi
 
@@ -243,6 +268,7 @@ cmd_run() {
 	if ! cp -f "${dl_work}/tailscaled" "${TS_BIN_DIR}/tailscaled" 2>/dev/null; then
 		log Error "Could not write the new binary; keeping ${_cur}."
 		write_state "failed-update"
+		ensure_daemon_running || true
 		return 1
 	fi
 	rm -rf "$dl_work"
@@ -252,6 +278,7 @@ cmd_run() {
 		log Error "tailscaled missing after update; rolling back."
 		cmd_rollback
 		write_state "rolled-back"
+		ensure_daemon_running || true
 		return 1
 	fi
 	chmod 0755 "${TS_BIN_DIR}/tailscaled" 2>/dev/null || true
@@ -263,6 +290,7 @@ cmd_run() {
 		log Error "tailscaled will not report a version after update; rolling back."
 		cmd_rollback
 		write_state "rolled-back"
+		ensure_daemon_running || true
 		return 1
 	fi
 
@@ -273,6 +301,7 @@ cmd_run() {
 		log Error "Daemon unhealthy after update to ${_new}; rolling back."
 		cmd_rollback
 		write_state "rolled-back"
+		ensure_daemon_running || true
 		return 1
 	fi
 
@@ -393,6 +422,8 @@ cmd_rollback() {
 	fi
 	log Error "Still unhealthy after rollback."
 	log Error "Inspect with: tailscaled.service log daemon"
+	# Even a failed rollback must not be the reason the phone has no daemon.
+	ensure_daemon_running || true
 	return 1
 }
 

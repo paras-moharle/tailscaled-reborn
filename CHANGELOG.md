@@ -1,3 +1,40 @@
+## v1.0.26  2026-10-19
+
+- **The daemon no longer disappears at boot.** The module used to move its
+  boot script into KernelSU's "general scripts" directory, where the manager
+  app can switch a script off. Switching one off truncates it to zero bytes
+  and removes its execute permission, and a script in that state is skipped
+  at boot with one line in the log that nobody reads. The phone then came up
+  with no daemon and no complaint anywhere -- the only symptom was the app
+  reporting a refused socket. The boot script stays in the module directory
+  now, which both Magisk and KernelSU run anyway, and the installer removes
+  the old copy and refuses to finish if the script did not install properly.
+- **A supervisor.** Something now notices when the daemon or the Taildrop
+  receiver dies and puts them back, within about half a minute. Until now
+  the boot script ran once and nothing ever checked again, so a daemon that
+  died stayed dead until the next reboot. A daemon switched off on purpose --
+  with the app's toggle, or with the module's `disable` file -- is left
+  alone.
+- **An update can no longer leave the phone without a daemon.** Every
+  failure path in the updater now checks the daemon is up before returning.
+- **The root manager no longer says "running" when it is not.** The module
+  description showed the daemon's state, but it was only written when the
+  daemon was started or stopped, so a daemon that was killed left the
+  manager claiming it was running. The state is now re-checked rather than
+  remembered.
+- **The app shows the supervisor's state**, so it is visible whether the
+  module is working or merely quiet.
+- **The boot wait is bounded.** The script waited for the boot to complete
+  forever, with no limit and no message.
+- **The boot script no longer blocks on the update check**, which can take
+  minutes on a slow link.
+- **The module directory is no longer hardcoded.** It is named after the id
+  in module.prop, which has changed over the life of the project; the
+  installer now writes down where it actually is.
+- **`settings.sh` can no longer abort a script by accident.** It is sourced
+  by every script under `set -e`, so a single failing command in it killed
+  the script that sourced it, silently.
+
 ## v1.0.25  2026-10-17
 
 - Nautilus menu no longer freezes on large folders. Packing a folder into a zip

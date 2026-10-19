@@ -101,6 +101,9 @@
 	<string name="receive_files_sub">Move what Taildrop received into Downloads/Tailscale</string>
 	<string name="received_n">Received %1$d file(s)</string>
 	<string name="update_check_hint">Look for a newer tailscaled</string>
+	<string name="supervisor">Supervisor</string>
+	<string name="supervisor_running">running — restarts the daemon if it dies</string>
+	<string name="supervisor_stopped">not running</string>
 	<string name="link_direct">direct</string>
 	<string name="link_relay">relay %1$s</string>
 	<string name="link_offline">offline — connect to internet</string>

@@ -1,17 +1,33 @@
 #!/system/bin/sh
+#
+# `set -e` is on, and this file is *sourced* by every script in the module, so
+# it applies to the sourcing shell too. That makes any command here that
+# fails fatal: the script that sourced us dies before it has printed
+# anything, which is the worst possible moment to fail silently. Every
+# command below is therefore written to survive its own failure.
 set -e
 
 # Custom settings
 
-# Set Magisk Tailscale module variables
-# Must match `id` in module.prop: Magisk/KernelSU name the module folder
-# after it, and the manager treats two modules with one id as the same.
-TS_MOD_DIR="/data/adb/modules/paras-tailscaled"
-export TS_MOD_PROP="${TS_MOD_DIR}/module.prop"
-
 # Set tailscale directory variables
 TS_DIR="/data/adb/tailscale"
 TS_BIN_DIR="${TS_DIR}/bin"
+TS_SCRIPTS_DIR="${TS_SCRIPTS_DIR:-${TS_DIR}/scripts}"
+
+# Set Magisk Tailscale module variables
+# The module directory is named after `id` in module.prop, so it cannot be
+# hardcoded: the id has changed over the life of this project, and a build
+# installed under a different id then could not find its own module.prop --
+# so the version read as empty and the disable file was never seen.
+#
+# customize.sh writes the real path here at install time. The fallback is the
+# current id, for an installation that somehow predates that.
+if [ -f "${TS_DIR}/module-dir" ]; then
+	TS_MOD_DIR="$(cat "${TS_DIR}/module-dir" 2>/dev/null)"
+fi
+[ -n "${TS_MOD_DIR:-}" ] || TS_MOD_DIR="/data/adb/modules/paras-tailscaled"
+export TS_MOD_DIR
+export TS_MOD_PROP="${TS_MOD_DIR}/module.prop"
 
 # Where "what version is current?" is answered from. This is a release asset
 # behind GitHub's /releases/latest/ redirect, not the GitHub API:
@@ -34,7 +50,9 @@ export HOME="/data/adb/tailscale/" # Because tailscaled will write log to $HOME
 # stage, and every send reports success while nothing is ever written.
 # Pin it inside the module so the daemon is independent of its launcher.
 export TMPDIR="${TS_DIR}/tmp"
-mkdir -p "$TMPDIR"
+# Not fatal if it fails: a missing TMPDIR is reported by the daemon
+# itself, which is a better place for the news than a silent exit here.
+mkdir -p "$TMPDIR" 2>/dev/null || true
 
 # Set tailscaled & tailscale configuration
 export TS_DAEMON_CMD="tailscaled -no-logs-no-support"
@@ -53,6 +71,68 @@ export TS_CLI="${TS_BIN_DIR}/tailscale"
 
 # Where Taildrop deliveries are placed so they show up in the Files app.
 export TS_TAILDROP_DIR="${TS_TAILDROP_DIR:-/sdcard/Download/Tailscale}"
+
+# ---------------------------------------------------------------------------
+# Module status in the root manager
+# ---------------------------------------------------------------------------
+#
+# The root manager shows a module's description line in its list, and this
+# module puts the daemon's state there. That is worth doing -- it is the
+# first place a person looks to see whether the daemon is alive -- but it
+# used to be written only when the daemon was started or stopped.
+#
+# A daemon that was killed rather than stopped never produced a "stopped"
+# message, so the root manager went on saying "running" for hours, on a
+# phone that had no Tailscale at all. The line was not wrong when it was
+# written; it was simply never revised.
+#
+# So the state is now re-checked rather than remembered. The description is
+# rewritten only when the state actually changes, because module.prop lives
+# on flash and rewriting it every few seconds is wear for nothing.
+#
+#   running  -> "✔ tailscaled service is running!!!"
+#   stopped  -> "✘ tailscaled is not running"
+TS_MODULE_STATE_FILE="${TS_RUN_DIR}/module.state"
+
+ts_module_desc() {
+	case "$1" in
+	running) printf '[ ⏲ %s | ✔ tailscaled service is running!!! ] ' "$CURRENT_TIME" ;;
+	stopped) printf '[ ⏲ %s | ✘ tailscaled is not running ] ' "$CURRENT_TIME" ;;
+	*) return 1 ;;
+	esac
+}
+
+# ts_module_status <running|stopped>
+#
+# Writes the state into module.prop, but only when it differs from the last
+# state we wrote. A missing or unreadable module.prop is not fatal: the
+# module still works, it just does not advertise itself in the manager.
+ts_module_status() {
+	_want="$1"
+	_have="$(cat "$TS_MODULE_STATE_FILE" 2>/dev/null || true)"
+	[ "$_have" = "$_want" ] && return 0
+
+	mkdir -p "$TS_RUN_DIR" 2>/dev/null
+	echo "$_want" > "$TS_MODULE_STATE_FILE" 2>/dev/null || true
+
+	[ -f "$TS_MOD_PROP" ] || return 0
+	_desc="$(ts_module_desc "$_want")" || return 0
+	# The description carries a sentence of its own after the status, so the
+	# status is replaced rather than the whole line.
+	_tmp="$TS_MOD_PROP.ts.$$"
+	# The status prefix is optional: a freshly installed module.prop has a
+	# plain description and no prefix at all, and the first write has to put
+	# one there. The delimiter is @ and the match stops at the first ], since
+	# the description text itself contains a "|" and a "]", either of which
+	# would break a naive substitution.
+	if sed -E "s@^description=(\[[^]]*\][[:space:]]*)?@description=${_desc}@" \
+		"$TS_MOD_PROP" > "$_tmp" 2>/dev/null; then
+		mv -f "$_tmp" "$TS_MOD_PROP" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+	else
+		rm -f "$_tmp" 2>/dev/null
+	fi
+	return 0
+}
 
 # ---------------------------------------------------------------------------
 # CLI symlink
@@ -140,7 +220,7 @@ latest_published_epoch() {
 }
 
 # Take the current time
-CURRENT_TIME=$(date +"%I:%M %P")
+CURRENT_TIME=$(date +"%I:%M %P" 2>/dev/null || echo "--:-- --")
 
 # ---------------------------------------------------------------------------
 # Auto-update settings
@@ -183,16 +263,16 @@ log() {
   # Add messages to time and parameters
   message="${CURRENT_TIME} [$1]: $2"
   if [ -z "$color" ]; then
-    echo "${CURRENT_TIME} [Debug]: $1 $2" >>${TS_RUN_LOG_FILE} 2>&1
+    echo "${CURRENT_TIME} [Debug]: $1 $2" >>${TS_RUN_LOG_FILE} 2>&1 || true
     return
   fi
   if [ -t 1 ]; then
     # Prints messages to the console
-    echo "${color}${message}${normal}"
-    echo "${message}" >>${TS_RUN_LOG_FILE} 2>&1
+    echo "${color}${message}${normal}" || true
+    echo "${message}" >>${TS_RUN_LOG_FILE} 2>&1 || true
   else
     # Print messages to a log file
-    echo "${message}" >>${TS_RUN_LOG_FILE} 2>&1
+    echo "${message}" >>${TS_RUN_LOG_FILE} 2>&1 || true
   fi
 }
 

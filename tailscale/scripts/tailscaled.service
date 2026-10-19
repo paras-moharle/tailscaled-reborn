@@ -143,20 +143,37 @@ _tailscaled(){
   logdir="${TS_DIR}/run"
   command="${TS_DAEMON_CMD}"
   tailscaled_up(){
-    sed -Ei "s/^description=(\[.*][[:space:]]*)?/description=[ ⏲ $CURRENT_TIME | ✔ tailscaled service is running!!! ] /g" "$TS_MOD_PROP"
+    ts_module_status running
   }
   tailscaled_down(){
-    sed -Ei "s/^description=(\[.*][[:space:]]*)?/description=[ ⏲ $CURRENT_TIME | ✘ tailscaled shutting down, service is stopped !!! ] /g" "$TS_MOD_PROP"
+    ts_module_status stopped
+    # The daemon's own log simply stops mid-line when it dies, with nothing
+    # to say whether it crashed or was killed. Write the ending down where a
+    # person will look for it.
+    log Warning "tailscaled stopped. If this was not deliberate, the supervisor will start it again."
   }
   pre_up=""
   pre_down=""
   post_up="tailscaled_up"
   post_down="tailscaled_down"
+  # What the user last asked for.
+  #
+  # The supervisor has to know the difference between "the daemon died" and
+  # "the user switched it off", or it would switch a deliberately stopped
+  # daemon back on. This file is that answer, and it is written here because
+  # every way of starting or stopping the daemon -- the app, the boot
+  # script, the inotify watcher, the updater -- goes through this function.
+  record_wanted() {
+    mkdir -p "${TS_RUN_DIR}" 2>/dev/null
+    echo "$1" > "${TS_RUN_DIR}/daemon.wanted" 2>/dev/null || true
+  }
+
   case "$1" in
     status)
       program is_running
     ;;
     start)
+      record_wanted running
       if ! program is_running && ! program start; then
         log Warning "Got unfriendly response after start tailscaled !"
         return 1
@@ -173,6 +190,7 @@ _tailscaled(){
       log Info "Restart success !"
     ;;
     stop)
+      record_wanted stopped
       if ! program stop; then
         log Error "Got unfriendly response after stop tailscaled !"
         return 1

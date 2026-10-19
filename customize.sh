@@ -182,43 +182,55 @@ set_perm "$MODPATH/service.sh" 0 0 0755 "u:object_r:system_file:s0"
 # everything it installed, including the app, stays behind.
 set_perm "$MODPATH/uninstall.sh" 0 0 0755 "u:object_r:system_file:s0"
 
-if [ ! -f "$SERVICE_DIR/tailscaled_service.sh" ]; then
-	# offer to move module scripts to general scripts
-	ui_print "-----------------------------------------------------------"
-	ui_print "- Do you want to move Module Scripts to General Scripts ?"
-	ui_print "- This option allows you to toggle the 'tailscaled' service"
-	ui_print "  on or off by enabling or disabling modules."
-	ui_print "- Your service directory is :"
-	ui_print "  '$SERVICE_DIR'."
-	ui_print "- Because the Developer Guides mentioned :"
-	ui_print "  Modules should NOT add general scripts during installation."
-	ui_print "- I offer this option to you."
-	ui_print "- You have 10 seconds to make a selection. Default is [Yes]."
-	ui_print "- [ Vol UP(+): Yes ]"
-	ui_print "- [ Vol DOWN(-): No ]"
-	timeout 10 sh -c '
-  while true; do
-    if getevent -lc 1 2>&1 | grep -q KEY_VOLUMEUP; then
-      echo "up"
-      break
-    elif getevent -lc 1 2>&1 | grep -q KEY_VOLUMEDOWN; then
-      echo "down"
-      break
-    fi
-  done
-' >"$TMPDIR/choice" || true
+# The boot script stays inside the module directory.
+#
+# It used to be moved into /data/adb/service.d -- KernelSU's "general scripts"
+# directory -- so the manager app could switch the service on and off. That
+# turned out to be a trap, and it cost a phone its Tailscale for a day.
+#
+# The manager's toggle works by truncating the script to zero bytes and
+# removing its execute permission. A script in that state is skipped at boot
+# with a single line in the log that nobody reads:
+#
+#   ksud::module: /data/adb/service.d/tailscaled_service.sh is not executable, skip
+#
+# The phone then came up with no daemon and no complaint anywhere. The only
+# symptom was the app reporting that the local socket was refused, which reads
+# like a broken module rather than a boot script that was switched off.
+#
+# KernelSU and Magisk both run a module's own service.sh at boot -- the boot
+# log shows it executing service.sh for every module that has one -- so
+# keeping the script here is both safer and simpler.
+ui_print "- Keeping the boot script inside the module."
 
-	choice=$(cat "$TMPDIR/choice" 2>/dev/null)
-	if [ "$choice" = "up" ] || [ -z "$choice" ]; then
-		ui_print "- [Yes] Move Module Scripts to General Scripts."
-		mv -f "$MODPATH/service.sh" "$SERVICE_DIR/tailscaled_service.sh"
-	else
-		ui_print "- [No] Skip and keep using Module Scripts."
-	fi
-else
-	ui_print "- Move General Scripts."
-	mv -f "$MODPATH/service.sh" "$SERVICE_DIR/tailscaled_service.sh"
+# Remove a general script left behind by an earlier install. It is a copy of
+# what used to live here, and while it is still executable it would start a
+# second daemon alongside the module's own.
+if [ -f "$SERVICE_DIR/tailscaled_service.sh" ]; then
+	rm -f "$SERVICE_DIR/tailscaled_service.sh" 2>/dev/null || true
+	ui_print "- Removed the old general script (it would start a second daemon)."
 fi
+
+# The boot script is the only thing that starts the daemon when the phone
+# boots, so a missing or non-executable copy means a phone with no Tailscale
+# and no way to tell why. Check it here, where someone is still watching,
+# rather than finding out at the next reboot.
+if [ ! -s "$MODPATH/service.sh" ]; then
+	abort "error: the boot script did not install correctly."
+fi
+if [ ! -x "$MODPATH/service.sh" ]; then
+	set_perm "$MODPATH/service.sh" 0 0 0755 "u:object_r:system_file:s0"
+fi
+if [ ! -x "$MODPATH/service.sh" ]; then
+	abort "error: the boot script is not executable."
+fi
+
+# The module directory is named after the id in module.prop, so the scripts
+# cannot know it in advance. Write it down for them: hardcoding it meant that
+# a build installed under a different id could not find its own module.prop,
+# and the version read as empty.
+echo "$MODPATH" > "$TS_DIR/module-dir" 2>/dev/null || true
+
 ui_print "- Installing the TailBridge app..."
 # The companion app is the only interface this fork ships: it provides Taildrop
 # (there is no other way to send a file, because this module deliberately leaves

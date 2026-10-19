@@ -34,8 +34,23 @@ start_receiver() {
   tailscaled.receive run >> "/dev/null" 2>&1 &
 }
 
+# The supervisor. The boot script runs once; anything that kills the daemon
+# after that left the phone with no Tailscale and no error to explain it.
+# This is the thing that notices and puts it back.
+#
+# It is a separate script so that it can be found and killed by name, and it
+# checks the `disable` file and the wanted state itself, so it never undoes
+# a stop the user asked for.
+start_keepalive() {
+  for PID in $(busybox pidof keepalive.sh); do
+    kill -9 "$PID" 2>/dev/null
+  done
+  nohup "${TS_SCRIPTS_DIR}/keepalive.sh" >> "/dev/null" 2>&1 &
+}
+
 module_version=$(busybox awk -F'=' '!/^ *#/ && /version=/ { print $2 }' "$TS_MOD_PROP" 2>/dev/null)
 log Info "Tailscaled Reborn version : ${module_version}."
 start_service
 start_inotifyd
 start_receiver
+start_keepalive
