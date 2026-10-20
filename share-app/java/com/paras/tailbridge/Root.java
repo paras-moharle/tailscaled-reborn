@@ -37,9 +37,19 @@ final class Root {
 				// Very unusual (root not installed at all): fall back to PATH.
 				return Runtime.getRuntime().exec(new String[] { "su" });
 			} catch (Exception ignored) {
-				// Report why the known path failed, not the PATH attempt, or the
-				// user only ever sees "No such file or directory" for "su".
-				throw first;
+				// The binary is there but could not be run.
+				//
+				// That is what a root manager that has not granted this app
+				// permission looks like: Android reports a denied exec as
+				// "no such file or directory" rather than saying the policy
+				// stopped it, which is deliberate -- it does not want to tell
+				// an app that it is talking to a root manager at all.
+				//
+				// So this is a permission problem, not a broken module, and
+				// it has to be reported as one. Left as a plain exception it
+				// became "the module is not installed or is broken", which
+				// sent the user looking for a module that was working.
+				throw new Denied("root permission denied");
 			}
 		}
 	}

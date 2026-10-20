@@ -44,6 +44,28 @@ final class Api {
 		return call(DEFAULT_TIMEOUT_MS, args);
 	}
 
+	/**
+	 * Run one API command and return its raw output.
+	 *
+	 * <p>For the commands that answer with a JSON array rather than an
+	 * object. The same root handling and the same timeout rules apply; only
+	 * the shape of the answer differs.
+	 */
+	private static String callRaw(long timeoutMs, String... args) throws Exception {
+		StringBuilder cmd = new StringBuilder(PATH);
+		for (String a : args) {
+			cmd.append(" '").append(a.replace("'", "'\\''")).append('\'');
+		}
+		try {
+			return Root.sh(cmd.toString(), timeoutMs).trim();
+		} catch (Root.Denied d) {
+			throw d;
+		} catch (Exception e) {
+			throw new ApiBroken("root is available but the module is not installed or "
+					+ "is broken: " + e, false);
+		}
+	}
+
 	private static JSONObject call(long timeoutMs, String... args) throws Exception {
 		StringBuilder cmd = new StringBuilder(PATH);
 		for (String a : args) {
@@ -186,6 +208,40 @@ final class Api {
 	static boolean send(String peerIp, String path) throws Exception {
 		call(600_000, "send", peerIp, path);
 		return true;
+	}
+
+	// ------------------------------------------------------------- clipboard
+
+	/**
+	 * The clipboard history, newest first.
+	 *
+	 * <p>Each entry carries its text base64 encoded. The store lives in the
+	 * module and is written by a shell process, so the text goes in encoded:
+	 * a shell variable cannot hold a trailing newline, and clipboard contents
+	 * are arbitrary text that ends in one more often than not.
+	 */
+	static JSONArray clipboardList() throws Exception {
+		String out = callRaw(DEFAULT_TIMEOUT_MS, "clipboard", "list");
+		int i = out.indexOf('[');
+		if (i < 0) {
+			return new JSONArray();
+		}
+		return new JSONArray(out.substring(i).trim());
+	}
+
+	/** The clipboard right now, not the last one recorded. */
+	static JSONObject clipboardNow() throws Exception {
+		return call("clipboard", "get");
+	}
+
+	/** Send the current clipboard to a peer. */
+	static void clipboardSend(String peerIp) throws Exception {
+		call(120_000, "clipboard", "send", peerIp);
+	}
+
+	/** Empty the history. */
+	static void clipboardClear() throws Exception {
+		call("clipboard", "clear");
 	}
 
 	/** Apply a preference. Returns the refreshed status document. */

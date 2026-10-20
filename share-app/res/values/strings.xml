@@ -13,6 +13,25 @@
 	<string name="nav_send">Send</string>
 	<string name="nav_settings">Settings</string>
 	<string name="nav_system">System</string>
+	<string name="nav_clip">Clip</string>
+
+	<!-- clipboard -->
+	<string name="clip_heading">Clipboard</string>
+	<string name="clip_watching">Watching the clipboard</string>
+	<string name="clip_watching_off">The clipboard watcher is not running</string>
+	<string name="clip_empty">Nothing copied yet. Anything you copy appears here.</string>
+	<string name="clip_send_all">Send the clipboard to every online device</string>
+	<string name="clip_now">Clipboard right now</string>
+	<string name="clip_now_empty">The clipboard is empty</string>
+	<string name="clip_search_hint">Search the history</string>
+	<string name="clip_clear">Clear the history</string>
+	<string name="clip_copied">Copied to the clipboard</string>
+	<string name="clip_sent">Sent to %1$s</string>
+	<string name="clip_from_peer">from a peer</string>
+	<string name="clip_no_source">unknown app</string>
+	<string name="clip_send_to">Send to…</string>
+	<string name="clip_copy">Copy</string>
+	<string name="clip_entry_count">%1$d entries</string>
 
 	<string name="connected">Connected</string>
 	<string name="stopped">Stopped</string>

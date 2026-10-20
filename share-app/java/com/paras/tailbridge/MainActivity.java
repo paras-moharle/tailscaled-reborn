@@ -86,7 +86,10 @@ public class MainActivity extends Activity {
 	private LinearLayout pSend;
 	private LinearLayout pSettings;
 	private LinearLayout pSystem;
-	private final View[] navs = new View[3];
+	private final View[] navs = new View[4];
+
+	/** The clipboard history panel, rebuilt whenever the history changes. */
+	private LinearLayout pClip;
 
 	private Button sendBtn;
 	/** row that offers the software update once a newer build is known. */
@@ -119,10 +122,12 @@ public class MainActivity extends Activity {
 		pSend = findViewById(R.id.pSend);
 		pSettings = findViewById(R.id.pSettings);
 		pSystem = findViewById(R.id.pSystem);
+		pClip = findViewById(R.id.pClip);
 
 		navs[0] = findViewById(R.id.navSend);
 		navs[1] = findViewById(R.id.navSettings);
 		navs[2] = findViewById(R.id.navSystem);
+		navs[3] = findViewById(R.id.navClip);
 		for (int i = 0; i < navs.length; i++) {
 			final int n = i;
 			navs[i].setOnClickListener(v -> tab(n));
@@ -146,6 +151,7 @@ public class MainActivity extends Activity {
 		attachPullToRefresh(findViewById(R.id.scrollSend), pullRefresh);
 		attachPullToRefresh(findViewById(R.id.scrollSettings), pullRefresh);
 		attachPullToRefresh(findViewById(R.id.scrollSystem), pullRefresh);
+		attachPullToRefresh(findViewById(R.id.scrollClip), pullRefresh);
 
 		defaultTargets = getPreferences(0).getString("targets", "");
 		android.content.Intent launch = getIntent();
@@ -348,6 +354,7 @@ public class MainActivity extends Activity {
 				findViewById(R.id.scrollSend),
 				findViewById(R.id.scrollSettings),
 				findViewById(R.id.scrollSystem),
+				findViewById(R.id.scrollClip),
 		};
 		for (int i = 0; i < scrolls.length; i++) {
 			scrolls[i].setVisibility(i == n ? View.VISIBLE : View.GONE);
@@ -1172,6 +1179,196 @@ public class MainActivity extends Activity {
 		buildSend(ps);
 		buildSettings(st);
 		buildSystem(st);
+		loadClipboard();
+	}
+
+	// ------------------------------------------------------------ clipboard
+
+	/**
+	 * The clipboard history.
+	 *
+	 * <p>Loaded separately from the status, because it is a different size of
+	 * thing: the status is one local read, while the history is a list of
+	 * everything that has been copied, and it changes on its own.
+	 */
+	private void loadClipboard() {
+		new Thread(() -> {
+			try {
+				final JSONArray entries = Api.clipboardList();
+				ui.post(() -> renderClipboard(entries));
+			} catch (Exception e) {
+				ui.post(() -> renderClipboard(null));
+			}
+		}).start();
+	}
+
+	/** One history entry, as the module recorded it. */
+	private static final class ClipEntry {
+		long time;
+		String textB64 = "";
+		String source = "";
+		boolean fromPeer;
+	}
+
+	private static List<ClipEntry> clipsFrom(JSONArray arr) {
+		List<ClipEntry> out = new ArrayList<>();
+		if (arr == null) {
+			return out;
+		}
+		for (int i = 0; i < arr.length(); i++) {
+			JSONObject o = arr.optJSONObject(i);
+			if (o == null) {
+				continue;
+			}
+			ClipEntry e = new ClipEntry();
+			e.time = o.optLong("t", 0);
+			e.textB64 = o.optString("c", "");
+			e.source = o.optString("s", "");
+			e.fromPeer = o.optInt("d", 0) == 1;
+			out.add(e);
+		}
+		return out;
+	}
+
+	private static String clipText(ClipEntry e) {
+		try {
+			return new String(android.util.Base64.decode(e.textB64,
+					android.util.Base64.DEFAULT), "UTF-8");
+		} catch (Exception ex) {
+			return "";
+		}
+	}
+
+	private void renderClipboard(JSONArray arr) {
+		if (pClip == null) {
+			return;
+		}
+		pClip.removeAllViews();
+
+		List<ClipEntry> entries = clipsFrom(arr);
+		LinearLayout g = group(pClip, getString(R.string.clip_heading));
+
+		// What is on the clipboard right now, and the button that sends it.
+		action(g, getString(R.string.clip_now), null, v -> showClipboardNow());
+		action(g, getString(R.string.clip_send_all), null, v -> sendClipboardToAll());
+
+		if (entries.isEmpty()) {
+			note(pClip, arr == null
+					? getString(R.string.failed, "the clipboard could not be read")
+					: getString(R.string.clip_empty));
+			return;
+		}
+
+		LinearLayout h = group(pClip, getString(R.string.clip_entry_count, entries.size()));
+		for (ClipEntry e : entries) {
+			String body = clipText(e);
+			String shown = body.replace('\n', ' ').trim();
+			if (shown.length() > 70) {
+				shown = shown.substring(0, 70) + "…";
+			}
+			if (shown.isEmpty()) {
+				shown = getString(R.string.clip_now_empty);
+			}
+			String who = e.fromPeer
+					? getString(R.string.clip_from_peer)
+					: (e.source.isEmpty() ? getString(R.string.clip_no_source) : e.source);
+			action(h, shown, who, v -> showClipEntry(e));
+		}
+
+		action(pClip, getString(R.string.clip_clear), null, v -> clearClipboard());
+	}
+
+	/** The clipboard as it is right now. */
+	private void showClipboardNow() {
+		new Thread(() -> {
+			try {
+				final JSONObject now = Api.clipboardNow();
+				ui.post(() -> {
+					String b64 = now.optString("text", "");
+					String body = "";
+					try {
+						body = new String(android.util.Base64.decode(b64,
+								android.util.Base64.DEFAULT), "UTF-8");
+					} catch (Exception ignored) {
+					}
+					if (body.isEmpty()) {
+						toast(getString(R.string.clip_now_empty));
+						return;
+					}
+					new android.app.AlertDialog.Builder(this, R.style.Theme_Share_Dialog)
+							.setTitle(getString(R.string.clip_now))
+							.setMessage(body)
+							.setPositiveButton(android.R.string.ok, null)
+							.show();
+				});
+			} catch (Exception e) {
+				ui.post(() -> toast(getString(R.string.failed, String.valueOf(e.getMessage()))));
+			}
+		}).start();
+	}
+
+	/** One entry of the history: show it, and offer to send or copy it. */
+	private void showClipEntry(ClipEntry e) {
+		String body = clipText(e);
+		android.app.AlertDialog.Builder b =
+				new android.app.AlertDialog.Builder(this, R.style.Theme_Share_Dialog)
+						.setTitle(e.source.isEmpty() ? getString(R.string.clip_heading) : e.source)
+						.setMessage(body.isEmpty() ? getString(R.string.clip_now_empty) : body)
+						.setPositiveButton(android.R.string.ok, null);
+		b.show();
+	}
+
+	/** Send whatever is on the clipboard to every device that is online. */
+	private void sendClipboardToAll() {
+		List<String> targets = new ArrayList<>();
+		for (String n : onlinePeers) {
+			String ip = peers.get(n);
+			if (ip != null && !ip.isEmpty()) {
+				targets.add(ip);
+			}
+		}
+		if (targets.isEmpty()) {
+			toast(getString(R.string.no_peers));
+			return;
+		}
+		toast(getString(R.string.working));
+		new Thread(() -> {
+			int ok = 0;
+			String err = null;
+			for (String ip : targets) {
+				try {
+					Api.clipboardSend(ip);
+					ok++;
+				} catch (Exception e) {
+					err = String.valueOf(e.getMessage());
+				}
+			}
+			final int sent = ok;
+			final String failure = err;
+			ui.post(() -> {
+				if (failure == null && sent == targets.size()) {
+					toast(getString(R.string.clip_sent, String.valueOf(sent)));
+				} else {
+					toast(getString(R.string.failed,
+							String.valueOf(sent) + "/" + targets.size()
+									+ (failure == null ? "" : " " + failure)));
+				}
+			});
+		}).start();
+	}
+
+	private void clearClipboard() {
+		new Thread(() -> {
+			try {
+				Api.clipboardClear();
+				ui.post(() -> {
+					toast(getString(R.string.done));
+					loadClipboard();
+				});
+			} catch (Exception e) {
+				ui.post(() -> toast(getString(R.string.failed, String.valueOf(e.getMessage()))));
+			}
+		}).start();
 	}
 
 	// ------------------------------------------------------------------ home

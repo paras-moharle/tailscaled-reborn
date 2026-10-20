@@ -144,6 +144,24 @@
 				android:paddingEnd="16dp"
 				android:paddingBottom="28dp" />
 		</ScrollView>
+
+		<ScrollView
+			android:id="@+id/scrollClip"
+			android:layout_width="match_parent"
+			android:layout_height="match_parent"
+			android:clipToPadding="false"
+			android:scrollbars="none"
+			android:visibility="gone">
+
+			<LinearLayout
+				android:id="@+id/pClip"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:orientation="vertical"
+				android:paddingStart="16dp"
+				android:paddingEnd="16dp"
+				android:paddingBottom="28dp" />
+		</ScrollView>
 	</FrameLayout>
 
 	<!-- ── nav: flat bar, hairline above, icon over a small word ── -->
@@ -205,6 +223,21 @@
 				android:id="@+id/navLabel"
 				style="@style/NavLabel"
 				android:text="@string/nav_system" />
+		</LinearLayout>
+
+		<LinearLayout
+			android:id="@+id/navClip"
+			style="@style/Nav">
+
+			<ImageView
+				android:id="@+id/navIcon"
+				style="@style/NavIcon"
+				android:src="@drawable/ic_clip" />
+
+			<TextView
+				android:id="@+id/navLabel"
+				style="@style/NavLabel"
+				android:text="@string/nav_clip" />
 		</LinearLayout>
 	</LinearLayout>
 </LinearLayout>

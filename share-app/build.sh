@@ -33,6 +33,22 @@ KS="$KS_DIR/tailbridge.jks"
 KS_PASS="tailbridge"
 ALIAS="tailbridge"
 
+# A key supplied from outside wins over the local one.
+#
+# This is what makes a release update the app in place. A build signs the app
+# with a key generated on the spot, so two builds have different signatures
+# and Android refuses to replace one with the other -- the symptom being a
+# module flash that updates the daemon but leaves the old app installed.
+#
+# CI passes a key in through TAILBRIDGE_KEYSTORE, which keeps the key out of
+# the repository. A local build without one uses the cached key, so a
+# developer's own builds keep updating each other.
+if [ -n "${TAILBRIDGE_KEYSTORE:-}" ] && [ -f "${TAILBRIDGE_KEYSTORE}" ]; then
+	KS="${TAILBRIDGE_KEYSTORE}"
+	echo "    using the key from TAILBRIDGE_KEYSTORE"
+fi
+
+
 # The signing key is deliberately NOT committed. Generate one on first build so
 # a fresh clone produces a working APK with nothing secret in the repository.
 if [ ! -f "$KS" ]; then

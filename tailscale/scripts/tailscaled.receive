@@ -138,6 +138,94 @@ copy_out() {
 	echo "$target"
 }
 
+# A clipboard file that arrived from a peer.
+#
+# The file is named "clip-*.clip" and starts with a magic line, so it cannot
+# be confused with an ordinary file the user sent. It is put into the
+# clipboard and recorded in the history, which is what makes the clipboard
+# follow the phone around rather than just being readable on it.
+#
+# The helper runs as the shell uid. Running it as root would make the
+# clipboard service clear the user's clipboard instead of setting it: the
+# service checks that the calling process owns the package it claims to be,
+# and root does not own com.android.shell.
+handle_clip() {
+	_file="$1"
+	base="$(basename "$_file")"
+	case "$base" in
+	clip-*.clip) ;;
+	*) return 0 ;;
+	esac
+
+	# The magic line has to be there. A file that merely ends in .clip is an
+	# ordinary file and is left alone.
+	_magic="$(head -1 "$_file" 2>/dev/null)"
+	[ "$_magic" = "TBCLIP1" ] || return 0
+
+	_meta="$(sed -n '2p' "$_file" 2>/dev/null)"
+	_b64="$(tail -n +3 "$_file" 2>/dev/null | tr -d '\n')"
+	[ -n "$_b64" ] || return 0
+
+	_text="$("${TS_BIN_DIR}/jq" -R -r '@base64d' <<EOF 2>/dev/null
+$_b64
+EOF
+)"
+	[ -n "$_text" ] || return 0
+
+	_src="$("${TS_BIN_DIR}/jq" -r '.s // ""' <<EOF 2>/dev/null
+$_meta
+EOF
+)"
+
+	# Put it in the clipboard.
+	ensure_clip_dex >/dev/null 2>&1
+	if su 2000 -c "CLASSPATH='${TS_CLIP_DEX_RUN:-/data/local/tmp/tailbridge-clip.dex}' app_process /system/bin ${TS_CLIP_CLASS:-com.paras.tailbridge.clip.ClipBoard} set com.android.shell" \
+		> /dev/null 2>&1 <<EOF
+$_b64
+EOF
+	then
+		log_line "clipboard received from ${_src:-a peer}"
+	else
+		log_line "clipboard arrived but could not be set"
+		return 0
+	fi
+
+	# Record it, so the history on this device knows about it too.
+	#
+	# The watcher also sees the clipboard change this just made, and records
+	# it -- without knowing where it came from. So the entry written here
+	# replaces a matching one rather than adding a second, and it is the one
+	# that survives: it knows the text came from a peer and which peer.
+	#
+	# -c: one entry per line, like the watcher writes them.
+	_store="${TS_CLIP_STORE:-${TS_DIR}/clipboard.jsonl}"
+	_json="$("${TS_BIN_DIR}/jq" -c -n \
+		--argjson t "$(busybox date +%s 2>/dev/null || echo 0)000" \
+		--arg c "$_b64" \
+		--arg s "${_src:-}" \
+		'{t:$t,c:$c,s:$s,d:1,p:0}' 2>/dev/null)"
+	[ -n "$_json" ] || return 0
+
+	_last_c=""
+	if [ -f "$_store" ]; then
+		_last_c="$(tail -n 1 "$_store" 2>/dev/null |
+			"${TS_BIN_DIR}/jq" -r '.c // ""' 2>/dev/null)"
+	fi
+	if [ -n "$_last_c" ] && [ "$_last_c" = "$_b64" ]; then
+		_tmp="${_store}.tmp.$$"
+		if sed '$d' "$_store" > "$_tmp" 2>/dev/null; then
+			printf '%s\n' "$_json" >> "$_tmp" 2>/dev/null
+			mv -f "$_tmp" "$_store" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+		else
+			rm -f "$_tmp" 2>/dev/null
+			printf '%s\n' "$_json" >> "$_store" 2>/dev/null
+		fi
+		return 0
+	fi
+	printf '%s\n' "$_json" >> "$_store" 2>/dev/null
+	return 0
+}
+
 # A file we could not move out. Said once, not once per poll.
 note_stuck() {
 	_f="$1"
@@ -232,6 +320,8 @@ drain() {
 			names="${names}${names:+, }$base"
 			exported="${exported}${exported:+, }$(basename "$out")"
 			[ -n "$first" ] || first="$out"
+			# A clipboard file is also put into the clipboard and recorded.
+			handle_clip "$out"
 		done
 	}
 
@@ -322,6 +412,22 @@ esac
 
 stop
 mkdir -p "$TS_RUN_DIR"
+
+# Only one receiver may run.
+#
+# Two of them race for the same deliveries: one moves a file out of the
+# inbox and the other finds it gone, and both announce it. The pid file only
+# remembers one of them, so a receiver left over from an earlier start is not
+# stopped by it and the two go on fighting over the same files.
+#
+# The match is on the full path so that nothing else on the device is
+# touched.
+for _p in $(pgrep -f '/tailscale/scripts/tailscaled.receive' 2>/dev/null); do
+	[ "$_p" = "$$" ] && continue
+	kill -9 "$_p" 2>/dev/null
+done
+sleep 1
+
 echo $$ > "$PIDFILE"
 
 # Take the pid file with us. A stale one is how a later stop ends up

@@ -164,6 +164,27 @@ unzip -qqo "$ZIPFILE" -x 'META-INF/*' 'tailscale/*' -d "$MODPATH"
 mkdir -p "$TS_DIR" "$TS_SCRIPTS_DIR" "$SERVICE_DIR" "$MODPATH/system/bin/"
 unzip -qqjo "$ZIPFILE" 'tailscale/scripts/*' -d "$TS_SCRIPTS_DIR"
 unzip -qqjo "$ZIPFILE" 'tailscale/settings.sh' -d "$TS_DIR"
+
+# The clipboard helper.
+#
+# It is kept with the rest of the module, and a read-only copy is placed
+# where the shell uid can read it: the helper has to run as the shell uid,
+# because that is the only uid the clipboard service trusts without a prompt
+# from the user, and it cannot reach anything under /data/adb -- that
+# directory is mode 0700.
+#
+# The copy has to be read-only for the caller as well. ART refuses to load a
+# dex file the caller could modify, and it does so by aborting with no
+# message at all.
+mkdir -p "$TS_DIR/clip"
+unzip -qqjo "$ZIPFILE" 'tailscale/clip/clip.dex' -d "$TS_DIR/clip" 2>/dev/null || true
+if [ -f "$TS_DIR/clip/clip.dex" ]; then
+	chmod 0644 "$TS_DIR/clip/clip.dex"
+	rm -f /data/local/tmp/tailbridge-clip.dex
+	cp "$TS_DIR/clip/clip.dex" /data/local/tmp/tailbridge-clip.dex
+	chown 0:0 /data/local/tmp/tailbridge-clip.dex
+	chmod 0444 /data/local/tmp/tailbridge-clip.dex
+fi
 ln -sf "$TS_BIN_DIR/tailscaled" "$TS_BIN_DIR/tailscale"
 ln -sf "$TS_BIN_DIR/"* "$MODPATH/system/bin/"
 
@@ -254,10 +275,31 @@ if [ -f "$APP_APK" ]; then
 	set_perm "$APP_APK" 0 0 0644
 	if pm install -r -g "$APP_APK" >/dev/null 2>&1; then
 		ui_print "  TailBridge installed."
+	elif pm install -r -g -d "$APP_APK" >/dev/null 2>&1; then
+		# Downgrading: the new build has a lower version code than the one
+		# installed, and Android refuses that without -d.
+		ui_print "  TailBridge installed (downgraded)."
 	else
-		ui_print "  Could not install TailBridge automatically."
-		ui_print "  Install it later with:"
-		ui_print "    pm install -r $APP_APK"
+		# Almost always a signing mismatch.
+		#
+		# Every build signs the app with a key generated on the spot, so two
+		# builds have different signatures and Android refuses to replace one
+		# with the other. Left alone, flashing a new module would leave the
+		# old app installed: the daemon updates, the app does not, and the
+		# two disagree about what the module can do.
+		#
+		# The app holds nothing of its own -- the daemon keeps the login and
+		# the settings live in the module -- so removing it and installing
+		# again loses nothing, and it makes a flash do what it says.
+		ui_print "  Replacing TailBridge (the new one is signed differently)."
+		pm uninstall com.paras.tailbridge >/dev/null 2>&1
+		if pm install -g "$APP_APK" >/dev/null 2>&1; then
+			ui_print "  TailBridge installed."
+		else
+			ui_print "  Could not install TailBridge automatically."
+			ui_print "  Install it later with:"
+			ui_print "    pm install -r $APP_APK"
+		fi
 	fi
 else
 	ui_print "  APK missing from this package."

@@ -39,6 +39,21 @@ start_receiver() {
   return 0
 }
 
+# The clipboard watcher.
+#
+# It runs the helper that reads the clipboard and records what is copied, so
+# the history is being kept whether or not the app is open. The helper must
+# run as the shell uid; see clipwatch.sh for why running it as root would
+# wipe the user's clipboard.
+start_clipwatch() {
+  for PID in $(pgrep -f '/tailscale/scripts/clipwatch.sh' 2>/dev/null); do
+    [ "$PID" = "$$" ] && continue
+    kill -9 "$PID" 2>/dev/null
+  done
+  nohup "${TS_SCRIPTS_DIR}/clipwatch.sh" >> "/dev/null" 2>&1 &
+  return 0
+}
+
 # The supervisor. The boot script runs once; anything that kills the daemon
 # after that left the phone with no Tailscale and no error to explain it.
 # This is the thing that notices and puts it back.
@@ -73,3 +88,4 @@ start_service || log Error "The daemon did not start."
 start_inotifyd || log Error "The inotify watcher did not start."
 start_receiver || log Error "The Taildrop receiver did not start."
 start_keepalive || log Error "The supervisor did not start."
+start_clipwatch || log Error "The clipboard watcher did not start."

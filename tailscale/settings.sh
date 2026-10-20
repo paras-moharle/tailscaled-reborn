@@ -95,6 +95,52 @@ export TS_CLI="${TS_BIN_DIR}/tailscale"
 export TS_TAILDROP_DIR="${TS_TAILDROP_DIR:-/sdcard/Download/Tailscale}"
 
 # ---------------------------------------------------------------------------
+# Clipboard helper
+# ---------------------------------------------------------------------------
+#
+# The helper is a small program that runs under app_process to read, write and
+# watch the clipboard. It has to run as the shell uid, and the clipboard
+# service checks that the calling process owns the package it claims to be --
+# so the helper always claims com.android.shell, which the shell uid owns.
+#
+# Two things about where it lives:
+#
+#   - It cannot live under /data/adb. That directory is mode 0700, so the
+#     shell uid cannot even traverse it, and the helper would die with a
+#     ClassNotFoundException that says nothing about permissions.
+#
+#   - The copy the helper loads must not be writable by the caller. ART
+#     refuses to load a dex file the caller could modify, and the failure is
+#     an abort with no message.
+#
+# So the canonical copy lives with the rest of the module, and a read-only
+# copy is placed where the shell uid can read it. ensure_clip_dex() puts it
+# back if it goes missing.
+TS_CLIP_DEX="${TS_DIR}/clip/clip.dex"
+TS_CLIP_DEX_RUN="${TS_CLIP_DEX_RUN:-/data/local/tmp/tailbridge-clip.dex}"
+TS_CLIP_CLASS="com.paras.tailbridge.clip.ClipBoard"
+TS_CLIP_STORE="${TS_CLIP_STORE:-${TS_DIR}/clipboard.jsonl}"
+
+ensure_clip_dex() {
+	[ -f "$TS_CLIP_DEX" ] || return 1
+	# Already there and already read-only for the caller: nothing to do.
+	if [ -f "$TS_CLIP_DEX_RUN" ]; then
+		_perm="$(ls -l "$TS_CLIP_DEX_RUN" 2>/dev/null | cut -c1-10)"
+		case "$_perm" in
+		r--------r-------- | r--------r--r-- | r--r--r--r-- | r--r--r---)
+			return 0
+			;;
+		esac
+	fi
+	# Replace it: a file the caller can write to would be refused by ART.
+	rm -f "$TS_CLIP_DEX_RUN" 2>/dev/null
+	cp "$TS_CLIP_DEX" "$TS_CLIP_DEX_RUN" 2>/dev/null || return 1
+	chown 0:0 "$TS_CLIP_DEX_RUN" 2>/dev/null || true
+	chmod 0444 "$TS_CLIP_DEX_RUN" 2>/dev/null || true
+	[ -f "$TS_CLIP_DEX_RUN" ]
+}
+
+# ---------------------------------------------------------------------------
 # Module status in the root manager
 # ---------------------------------------------------------------------------
 #

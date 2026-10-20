@@ -4,7 +4,7 @@ Tailscale on a rooted Android phone: the daemon built from upstream, kept up to
 date on its own, with a companion app for sending files and a desktop
 integration for the other direction.
 
-[![module](https://img.shields.io/badge/module-v1.0.27-4ea1ff)](module.prop)
+[![module](https://img.shields.io/badge/module-v1.0.28-4ea1ff)](module.prop)
 [![tailscale](https://img.shields.io/badge/tailscale-1.104.1-3ddc84)](https://tailscale.com)
 [![license](https://img.shields.io/badge/license-BSD--3--Clause-a78bfa)](LICENSE)
 
@@ -21,6 +21,8 @@ integration for the other direction.
 - **Taildrop**, so files move both ways: from the phone through the app or any
   app's share sheet, and from a desktop through a Nautilus menu entry or the
   supplied receiver.
+- **A clipboard history.** Everything you copy is recorded with the app it
+  came from, and can be sent to your other machines in one tap.
 - **No Google Play Services, no account of its own.** Your existing Tailscale
   login is the login.
 
@@ -28,7 +30,7 @@ integration for the other direction.
 
 ## Install
 
-1. Download **`Tailscaled-Reborn-v1.0.27-full.zip`** from
+1. Download **`Tailscaled-Reborn-v1.0.28-full.zip`** from
    [the releases page](https://github.com/paras-moharle/tailscaled-reborn/releases).
 2. **Magisk / KernelSU → Modules → Install from storage.**
 3. Reboot.
@@ -135,6 +137,60 @@ systemctl --user enable --now taildrop-receiver.service
 To see what is running afterwards: `pgrep -af 'taildrop|omarchy-tailscale'`.
 
 **On macOS and Windows** the official Tailscale app already does this.
+
+---
+
+## Clipboard
+
+Everything you copy is recorded, so it is there when you want it, and it can
+be sent to your other machines without leaving the phone.
+
+Open **TailBridge → Clip**. The history is newest first, and each entry says
+which app it came from. Tap one to read it in full, or send it to a device.
+
+**Send the clipboard to every online device** is one tap, and the clipboard
+arrives there as a file it can paste from.
+
+### How it works, and why it needs root
+
+Android will not let an ordinary app read the clipboard while it is in the
+background, and since Android 10 it will not let it write at all unless the
+app is the focused one. What it does allow is the shell.
+
+So the module runs a small helper as the shell user. It turns itself into a
+system process, takes the system context from it, and reaches the clipboard
+service through the binder proxy that `ClipboardManager` keeps in a private
+field — the same approach ClipShare uses. The helper is about 10 KB, it is
+built from source with `javac` and `d8`, and it is not a separate dependency.
+
+**Two things that are easy to get wrong, and were:**
+
+- The helper must run as the shell user, not as root. The clipboard service
+  checks that the calling process owns the package it claims to be; root does
+  not own `com.android.shell`, so the service throws while trying to grant a
+  permission and **clears the user's clipboard**. Every call, silently.
+- The copy of the helper that the shell user loads has to be read-only for
+  it. ART refuses to load a dex file the caller could modify, and it does so
+  by aborting with no message at all.
+
+The history itself lives in the module, not in the app: `/data/adb/tailscale/clipboard.jsonl`,
+one JSON object per line, at most 5,000 entries and 8 MB, oldest dropped
+first. The app reads it through the module's API.
+
+### What it does not do
+
+- **Text only.** A clipboard item can also be an image or a file; those are
+  not handled yet.
+- **The history is local.** Entries are recorded on the phone that saw them.
+  Sending is explicit: nothing is sent until you tap Send.
+- **A clipboard that arrives from a peer is put on the clipboard**, and is
+  also recorded in the history marked as coming from a peer.
+
+### On the desktop
+
+The desktop receiver does not know about clipboard files yet. One sent from
+the phone arrives as a file in `~/Downloads/Tailscale`; pasting it from
+there is a copy and paste away.
 
 ---
 

@@ -1,3 +1,21 @@
+## v1.0.28  2026-10-21
+
+- **A clipboard history**, in a new Clip tab. Everything copied is recorded
+  with the app it came from, and can be sent to your other machines in one
+  tap. Up to 5,000 entries, kept in the module as one JSON object per line.
+- **Sending the clipboard to every online device** is one tap, and travels as
+  an ordinary Taildrop file, so the existing send path is used unchanged.
+- **A clipboard that arrives from a peer is put on the clipboard** and
+  recorded in the history marked as coming from a peer.
+- **The app no longer blames the module for a root problem.** Android reports
+  a denied exec as "no such file or directory", so an app that had not been
+  granted root was told the module was broken. It now says root is needed.
+- **Flashing a module can no longer leave a stale app behind.** Every build
+  signed the app with a key generated on the spot, so Android refused to
+  replace the installed one -- the daemon updated and the app did not. The
+  installer now removes and reinstalls the app when the signatures differ,
+  and the release build uses a stored key when the repository has one.
+
 ## v1.0.27  2026-10-20
 
 Fixes a regression introduced in v1.0.26, which broke the boot.

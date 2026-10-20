@@ -73,6 +73,27 @@ jobs:
         with:
           packages: 'build-tools;34.0.0 platforms;android-34'
 
+      # The app's signing key, if the repository has one stored as a secret.
+      #
+      # Without it every build signs the app with a fresh key, and Android
+      # then refuses to replace the installed app with the new one -- so a
+      # module flash updates the daemon and leaves the app behind. The key
+      # is a secret rather than a committed file, so the repository stays
+      # free of it.
+      - name: Set up the signing key
+        env:
+          TAILBRIDGE_KEYSTORE_B64: ${{ secrets.TAILBRIDGE_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$TAILBRIDGE_KEYSTORE_B64" ]; then
+            mkdir -p /tmp/ks
+            printf '%s' "$TAILBRIDGE_KEYSTORE_B64" | base64 -d > /tmp/ks/tailbridge.jks
+            chmod 0600 /tmp/ks/tailbridge.jks
+            echo "TAILBRIDGE_KEYSTORE=/tmp/ks/tailbridge.jks" >> "$GITHUB_ENV"
+            echo "using the stored signing key"
+          else
+            echo "no stored signing key; this build signs with a new one"
+          fi
+
       - name: Build
         run: ./.github/tools/build.sh
 

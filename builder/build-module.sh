@@ -52,8 +52,21 @@ if [ -n "$apk_version" ] && [ "$apk_version" != "$mod_version" ]; then
 fi
 
 # --- stage -------------------------------------------------------------------
+say "==> building the clipboard helper"
+# The clipboard helper is a small program that runs under app_process to read
+# and watch the clipboard. It is built here when the Android SDK is present.
+# Without one, the committed copy is used -- but the check below refuses to
+# ship a copy that is older than its sources, because a stale helper would
+# fail in a way that looks like the clipboard is broken.
+if ! "$root/builder/build-clip-dex.sh" >/dev/null 2>&1; then
+	say "    !! no Android SDK; using the committed helper"
+	[ -f "$root/tailscale/clip/clip.dex" ] || fail "tailscale/clip/clip.dex is missing and cannot be built"
+	_newest_src="$(find "$root/tailscale/clip/src" -name '*.java' -newer "$root/tailscale/clip/clip.dex" 2>/dev/null | head -1)"
+	[ -z "$_newest_src" ] || fail "tailscale/clip/clip.dex is older than its sources; build it with builder/build-clip-dex.sh"
+fi
+
 say "==> staging"
-mkdir -p "$stage/app" "$stage/tailscale/scripts" "$stage/META-INF/com/google/android"
+mkdir -p "$stage/app" "$stage/tailscale/scripts" "$stage/tailscale/clip" "$stage/META-INF/com/google/android"
 cp "$root/module.prop" "$root/customize.sh" "$root/service.sh" \
    "$root/uninstall.sh" "$root/LICENSE" "$root/THIRD-PARTY-NOTICES.md" "$stage/"
 cp -r "$root/META-INF/com/google/android/." "$stage/META-INF/com/google/android/"
@@ -64,6 +77,7 @@ cp "$root/tailscale/scripts/"*.sh "$root/tailscale/scripts/tailscaled.inotify" \
    "$root/tailscale/scripts/keepalive.sh" \
    "$stage/tailscale/scripts/" 2>/dev/null || \
 cp "$root/tailscale/scripts/"* "$stage/tailscale/scripts/"
+cp "$root/tailscale/clip/clip.dex" "$stage/tailscale/clip/"
 cp "$apk" "$stage/app/TailBridge.apk"
 
 # --- sanity: never ship a package that cannot install -----------------------
@@ -112,6 +126,11 @@ if grep -q 'service.d.*tailscaled_service\|tailscaled_service.sh' "$stage/custom
 	grep -q 'rm -f "$SERVICE_DIR/tailscaled_service.sh"' "$stage/customize.sh" ||
 		fail "customize.sh still installs into the general scripts directory"
 fi
+
+# The clipboard helper. Without it the clipboard commands fail at run time,
+# and the symptom is a refused socket rather than a missing file.
+[ -f "$stage/tailscale/clip/clip.dex" ] || fail "missing tailscale/clip/clip.dex"
+[ -s "$stage/tailscale/clip/clip.dex" ] || fail "tailscale/clip/clip.dex is empty"
 
 # The APK is the only interface this fork has, so an empty one is a broken zip.
 [ -s "$stage/app/TailBridge.apk" ] || fail "app APK is empty"

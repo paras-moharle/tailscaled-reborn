@@ -648,6 +648,143 @@ api_update() {
 	esac
 }
 
+# ---------------------------------------------------------------- clipboard --
+#
+# The clipboard is read, written and watched by a small helper that runs under
+# app_process as the shell uid. See tailscale/scripts/clipwatch.sh for why the
+# uid matters: as root it would wipe the user's clipboard.
+CLIP_DEX="${TS_CLIP_DEX_RUN:-/data/local/tmp/tailbridge-clip.dex}"
+CLIP_CLASS="${TS_CLIP_CLASS:-com.paras.tailbridge.clip.ClipBoard}"
+CLIP_STORE="${TS_CLIP_STORE:-${TS_DIR}/clipboard.jsonl}"
+
+# clip_run <mode> [stdin-file]
+#
+# Runs the helper as uid 2000 and prints what it says. Everything the helper
+# prints is one item per line; the text is base64 so nothing is lost in
+# transit.
+clip_run() {
+	_mode="$1"
+	_in="${2:-/dev/null}"
+	# The helper has to be somewhere the shell uid can read, and it has to be
+	# read-only there or ART refuses to load it. Put it back if it went
+	# missing.
+	ensure_clip_dex >/dev/null 2>&1
+	[ -f "$CLIP_DEX" ] || { echo "err:no clipboard helper"; return 1; }
+	su 2000 -c "CLASSPATH='${CLIP_DEX}' app_process /system/bin ${CLIP_CLASS} ${_mode} com.android.shell" \
+		< "$_in" 2>/dev/null
+}
+
+# One entry of the store, as JSON.
+#
+# The store is JSON lines: one object per line, appended to. Reading it with
+# jq -s turns it into an array, which is what the app wants.
+clip_store_json() {
+	[ -f "$CLIP_STORE" ] || { echo "[]"; return 0; }
+	"$JQ" -s '.' "$CLIP_STORE" 2>/dev/null || echo "[]"
+}
+
+api_clipboard() {
+	_cmd="${1:-list}"
+	shift 2>/dev/null || true
+	case "$_cmd" in
+	list)
+		# Newest first. The whole store is returned; the app pages it.
+		"$JQ" -s 'reverse' "$CLIP_STORE" 2>/dev/null | head -c 4000000
+		echo
+		;;
+	search)
+		_q="${1:-}"
+		[ -n "$_q" ] || { err "clipboard: search needs a query"; }
+		# The text is base64 in the store, so it has to be decoded before it
+		# can be matched. jq does that.
+		"$JQ" -s --arg q "$_q" '
+			[ .[] | select((.c | @base64d) | contains($q)) ] | reverse
+		' "$CLIP_STORE" 2>/dev/null || echo "[]"
+		echo
+		;;
+	get)
+		# The clipboard right now, not the last one recorded.
+		_out="$(clip_run get)"
+		_text=""
+		_uri=""
+		_src=""
+		while IFS= read -r _l; do
+			case "$_l" in
+			text:*)
+				_rest="${_l#text:}"
+				_text="$(printf '%s' "$_rest" | cut -d'|' -f1)"
+				_src="$(printf '%s' "$_rest" | cut -d'|' -f2-)"
+				[ "$_src" = "$_rest" ] && _src=""
+				;;
+			uri:*) _uri="${_l#uri:}" ;;
+			esac
+		done <<EOF
+$_out
+EOF
+		printf '{"ok":true,"text":%s,"uri":%s,"source":%s}\n' \
+			"$("$JQ" -Rn --arg t "$_text" '$t')" \
+			"$("$JQ" -Rn --arg u "$_uri" '$u')" \
+			"$("$JQ" -Rn --arg s "$_src" '$s')"
+		;;
+	send)
+		_peer="${1:-}"
+		[ -n "$_peer" ] || err "clipboard: send needs a peer"
+		valid_token "$_peer" || err "invalid peer: $_peer"
+		clip_send "$_peer"
+		;;
+	clear)
+		: > "$CLIP_STORE" 2>/dev/null || true
+		printf '{"ok":true}\n'
+		;;
+	*)
+		err "clipboard: unknown command $_cmd"
+		;;
+	esac
+}
+
+# Send the current clipboard to a peer.
+#
+# It travels as an ordinary Taildrop file whose name says what it is, so the
+# existing send path is used unchanged and the receiver on the other side
+# already knows how to move files around.
+clip_send() {
+	_peer="$1"
+	_out="$(clip_run get)"
+	_text=""
+	_src=""
+	while IFS= read -r _l; do
+		case "$_l" in
+		text:*)
+			_rest="${_l#text:}"
+			_text="$(printf '%s' "$_rest" | cut -d'|' -f1)"
+			_src="$(printf '%s' "$_rest" | cut -d'|' -f2-)"
+			[ "$_src" = "$_rest" ] && _src=""
+			;;
+		esac
+	done <<EOF
+$_out
+EOF
+	[ -n "$_text" ] || { err "clipboard: the clipboard is empty"; }
+
+	mkdir -p "$TS_DIR/tmp" 2>/dev/null
+	_mk="$TS_DIR/tmp/clip-$(date +%s 2>/dev/null || echo 0).clip"
+	# A small header so the receiver knows the time and the source app
+	# without having to guess. The magic line is what distinguishes a
+	# clipboard from an ordinary file that happens to end in .clip.
+	{
+		printf 'TBCLIP1\n'
+		printf '{"t":%s,"s":%s}\n' \
+			"$(date +%s 2>/dev/null || echo 0)" \
+			"$("$JQ" -Rn --arg s "$_src" '$s')"
+		printf '%s' "$_text"
+	} > "$_mk" 2>/dev/null
+
+	api_send "$_peer" "$_mk"
+	_rc=$?
+	rm -f "$_mk" 2>/dev/null
+	return $_rc
+}
+
 api_version() {
 	printf '{"ok":true,"module":%s,"binary":%s}\n' \
 		"$("$JQ" -Rn --arg m "$(module_version)" '$m')" \
@@ -710,6 +847,10 @@ service)
 	api_service "$@"
 	;;
 update) api_update ;;
+clipboard)
+	shift
+	api_clipboard "$@"
+	;;
 version) api_version ;;
 *)
 	err "unknown command: ${1:-<none>}"
