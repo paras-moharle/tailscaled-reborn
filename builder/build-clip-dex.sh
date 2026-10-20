@@ -31,7 +31,12 @@ fi
 
 echo "==> compiling the clipboard helper"
 find "$src" -name '*.java' > "$work/sources.txt"
-javac -nowarn -source 8 -target 8 -bootclasspath "$JAR" -d "$work/classes" \
+# --release rather than -source/-target/-bootclasspath, for the same reason
+# the app's build does it: android.jar's java.lang.invoke.LambdaMetafactory
+# is a stub with no metafactory method, so a lambda cannot be compiled
+# against it. The JDK supplies the real java.* classes and android.jar
+# supplies the android.* ones.
+javac -nowarn --release 11 -classpath "$JAR" -d "$work/classes" \
   @"$work/sources.txt"
 
 mkdir -p "$work/dex"

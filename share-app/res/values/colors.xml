@@ -7,21 +7,44 @@
 	     and a dark image scrolling past smears. Every shade below it is a step
 	     up from true black so that only the page itself is fully off. -->
 	<color name="bg">#FF000000</color>
-	<color name="surface">#FF171B21</color>
-	<color name="surfaceHi">#FF1F242C</color>
-	<color name="divider">#FF262C35</color>
 
-	<color name="text">#FFECEFF3</color>
-	<color name="text2">#FF98A2B0</color>
-	<color name="hint">#FF6B7583</color>
+	<!-- The elevation ladder.
+
+	     On true black there is no shadow to lift a card with, so depth has to
+	     come from the surface being a shade lighter than the page. A card
+	     also gets a gradient, very slightly lighter at the top, which is what
+	     a modern surface does with the light it is given. -->
+	<color name="surface">#FF101419</color>
+	<color name="surfaceTop">#FF161B23</color>
+	<color name="surfaceHi">#FF1C222B</color>
+	<color name="field">#FF141920</color>
+
+	<!-- Hairlines are white at a low alpha rather than a grey.
+
+	     A grey line is a line of its own colour. A white line at 8% is the
+	     same white as the text, just a whisper of it, so the card edges read
+	     as edges of the surface instead of as strokes drawn on top of it. -->
+	<color name="hairline">#14FFFFFF</color>
+	<color name="divider">#1AFFFFFF</color>
+
+	<color name="text">#FFF2F5F9</color>
+	<color name="text2">#FF9AA5B5</color>
+	<color name="hint">#FF616D7E</color>
 
 	<!--The one accent in the app. It marks the single primary action and
 	     nothing else, so "Send" is always the thing your eye lands on. -->
 	<color name="accent">#FF3D8BFF</color>
-	<color name="onAccent">#FF05121F</color>
+	<color name="accentHi">#FF5AA0FF</color>
+	<!--The accent at a low alpha, for the selected tab's pill and for the
+	    halo behind the status dot. -->
+	<color name="accentDim">#333D8BFF</color>
+	<color name="onAccent">#FF04121F</color>
 
 	<!-- Status only. -->
 	<color name="ok">#FF3DDC84</color>
+	<color name="okDim">#333DDC84</color>
 	<color name="warn">#FFFFB020</color>
+	<color name="warnDim">#33FFB020</color>
 	<color name="err">#FFFF5D5D</color>
+	<color name="errDim">#33FF5D5D</color>
 </resources>

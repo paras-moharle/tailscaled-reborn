@@ -1,22 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A clipboard: the board, and the clip at the top of it. -->
+<!-- Clip: a clipboard.
+
+     A board with a tab at the top and two lines on it. The old one was a
+     sheet of paper with a folded corner, which is a document, not a
+     clipboard. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
 	android:width="24dp" android:height="24dp"
 	android:viewportWidth="24" android:viewportHeight="24">
-	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.8"
 		android:strokeLineCap="round" android:strokeLineJoin="round"
 		android:fillColor="#00000000"
-		android:pathData="M8.5,4.5 L15.5,4.5 L18.5,7.5 L18.5,19.5 L5.5,19.5 L5.5,7.5 L8.5,4.5 Z" />
-	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+		android:pathData="M9.6,4.6 L9.6,3.5 L14.4,3.5 L14.4,4.6" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.8"
 		android:strokeLineCap="round" android:strokeLineJoin="round"
 		android:fillColor="#00000000"
-		android:pathData="M15.5,4.5 L15.5,7.5 L18.5,7.5" />
-	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
-		android:strokeLineCap="round" android:strokeLineJoin="round"
-		android:fillColor="#00000000"
-		android:pathData="M9.5,12.5 L14.5,12.5" />
-	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
-		android:strokeLineCap="round" android:strokeLineJoin="round"
-		android:fillColor="#00000000"
-		android:pathData="M9.5,16 L13,16" />
+		android:pathData="M7.5,4.6 L16.5,4.6 A2.5,2.5 0 0 1 19,7.1 L19,16.9 A2.5,2.5 0 0 1 16.5,19.4 L7.5,19.4 A2.5,2.5 0 0 1 5,16.9 L5,7.1 A2.5,2.5 0 0 1 7.5,4.6 Z" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.8"
+		android:strokeLineCap="round" android:fillColor="#00000000"
+		android:pathData="M8.8,11.4 L15.2,11.4" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.8"
+		android:strokeLineCap="round" android:fillColor="#00000000"
+		android:pathData="M8.8,15 L13.2,15" />
 </vector>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The floating button: the one action this screen exists for.
+
+     A circle rather than a rectangle, because it floats over the content
+     instead of belonging to it, and because a circle is small enough to
+     cover only the corner of the list. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+	android:color="#33FFFFFF">
+	<item>
+		<shape android:shape="oval">
+			<gradient android:angle="270"
+				android:startColor="@color/accentHi" android:endColor="@color/accent" />
+		</shape>
+	</item>
+</ripple>

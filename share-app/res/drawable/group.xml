@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- A card.
+
+     On a true black page there is no shadow to lift it with, so the card is
+     a shade lighter than the page and a hair lighter again at the top. The
+     hairline is white at 8% rather than a grey: a grey line is a line of its
+     own colour, while this reads as the edge of the surface. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-	<solid android:color="@color/surface" />
-	<corners android:radius="16dp" />
-	<stroke android:width="1dp" android:color="@color/divider" />
+	<gradient
+		android:angle="270"
+		android:startColor="@color/surfaceTop"
+		android:endColor="@color/surface" />
+	<corners android:radius="22dp" />
+	<stroke android:width="1dp" android:color="@color/hairline" />
 </shape>

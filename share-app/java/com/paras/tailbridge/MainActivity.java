@@ -20,7 +20,6 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -33,6 +32,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -73,7 +73,7 @@ public class MainActivity extends Activity {
 	/** peers ticked as send targets. */
 	private final Set<String> chosen = new LinkedHashSet<>();
 	/** pref key -> the switch showing it, so a failed write can be undone. */
-	private final Map<String, CheckBox> switches = new LinkedHashMap<>();
+	private final Map<String, android.widget.Switch> switches = new LinkedHashMap<>();
 
 	/** Self-name / address values, patched in place by the poller. */
 	private final List<TextView> nameValues = new ArrayList<>();
@@ -82,14 +82,93 @@ public class MainActivity extends Activity {
 	private TextView statusView;
 	private TextView versionView;
 	private View dotView;
+	/** The soft disc behind the status dot. */
+	private View dotHaloView;
 
 	private LinearLayout pSend;
 	private LinearLayout pSettings;
 	private LinearLayout pSystem;
 	private final View[] navs = new View[4];
 
+	/**
+	 * A toggle switch, in the app's own colours.
+	 *
+	 * <p>Android's own Switch, tinted. The check mark that a checkbox draws
+	 * says "this item is in a list"; a switch says "this is on or off",
+	 * which is what every control here actually is.
+	 */
+	private android.widget.Switch toggle(boolean on) {
+		android.widget.Switch sw = new android.widget.Switch(this);
+		sw.setChecked(on);
+		sw.setShowText(false);
+		sw.setTextOn("");
+		sw.setTextOff("");
+		sw.setThumbTintList(android.content.res.ColorStateList.valueOf(
+				getColor(on ? R.color.text : R.color.hint)));
+		sw.setTrackTintList(new android.content.res.ColorStateList(
+				new int[][] {
+						new int[] { android.R.attr.state_checked },
+						new int[] { },
+				},
+				new int[] { getColor(R.color.accent), getColor(R.color.surfaceHi) }));
+		return sw;
+	}
+
 	/** The clipboard history panel, rebuilt whenever the history changes. */
 	private LinearLayout pClip;
+	/** The list of entries, and the heading that counts them. */
+	private LinearLayout clipList;
+	private TextView clipListHeading;
+
+	/** package name -> the app's own name, so "com.android.chrome" reads as
+	 *  "Chrome". Resolved once and kept: the label does not change. */
+	private final Map<String, String> appLabels = new HashMap<>();
+	/** package name -> the app's icon, for the same reason. */
+	private final Map<String, android.graphics.drawable.Drawable> appIcons =
+			new HashMap<>();
+
+	/** The name an installed package goes by, or the package itself. */
+	private String appLabel(String pkg) {
+		if (pkg == null || pkg.isEmpty()) {
+			return "";
+		}
+		String cached = appLabels.get(pkg);
+		if (cached != null) {
+			return cached;
+		}
+		String label = pkg;
+		try {
+			android.content.pm.ApplicationInfo ai =
+					getPackageManager().getApplicationInfo(pkg, 0);
+			CharSequence l = getPackageManager().getApplicationLabel(ai);
+			if (l != null && l.length() > 0) {
+				label = l.toString();
+			}
+		} catch (Exception ignored) {
+			// Not installed, or not ours to look at. The package name is
+			// the honest answer in that case.
+		}
+		appLabels.put(pkg, label);
+		return label;
+	}
+
+	/** The icon an installed package goes by, or nothing. */
+	private android.graphics.drawable.Drawable appIcon(String pkg) {
+		if (pkg == null || pkg.isEmpty()) {
+			return null;
+		}
+		if (appIcons.containsKey(pkg)) {
+			return appIcons.get(pkg);
+		}
+		android.graphics.drawable.Drawable d = null;
+		try {
+			d = getPackageManager().getApplicationIcon(pkg);
+		} catch (Exception ignored) {
+			d = null;
+		}
+		appIcons.put(pkg, d);
+		return d;
+	}
 
 	private Button sendBtn;
 	/** row that offers the software update once a newer build is known. */
@@ -99,7 +178,21 @@ public class MainActivity extends Activity {
 
 	private JSONObject status;
 	private boolean polling;
-	private static final long POLL_MS = 5000;
+	/**
+	 * How often the screen checks for itself.
+	 *
+	 * <p>This is a backstop, not the mechanism. The module tells the app
+	 * when the clipboard changes and when the daemon's state changes, and
+	 * the app redraws then. Polling every five seconds as well was the
+	 * reason the screen kept saying things that were minutes out of date:
+	 * a change that happened between two polls was not shown until the
+	 * next one, and the half of the screen that the poll did not refresh
+	 * stayed stale while the half it did refresh moved on.
+	 *
+	 * <p>Fifteen seconds is the backstop for the things nothing announces:
+	 * a peer coming online, a phone waking up.
+	 */
+	private static final long POLL_MS = 15000;
 	private volatile String latestVersion = "";
 
 	private final List<Uri> pendingUris = new ArrayList<>();
@@ -119,6 +212,7 @@ public class MainActivity extends Activity {
 		statusView = findViewById(R.id.status);
 		versionView = findViewById(R.id.version);
 		dotView = findViewById(R.id.dot);
+		dotHaloView = findViewById(R.id.dotHalo);
 		pSend = findViewById(R.id.pSend);
 		pSettings = findViewById(R.id.pSettings);
 		pSystem = findViewById(R.id.pSystem);
@@ -160,11 +254,15 @@ public class MainActivity extends Activity {
 					|| android.content.Intent.ACTION_SEND_MULTIPLE.equals(launch.getAction()))) {
 			shareLaunch = true;
 		}
+		if (savedInstanceState != null) {
+			clipQuery = savedInstanceState.getString(KEY_CLIP_QUERY, "");
+		}
 		captureShare(launch);
 		tab(0);
 		checkRoot();
 		askNotificationPermission();
 		registerNetworkWatcher();
+		wireClipButtons();
 	}
 
 	private static final int REQ_NOTIFY = 4242;
@@ -240,6 +338,11 @@ public class MainActivity extends Activity {
 			staged.add(u.toString());
 		}
 		out.putStringArrayList("pending", staged);
+		// The search box is restored by Android itself, so the filter has
+		// to be restored as well. Without this the box showed what was
+		// typed while the list was not filtered by it, which is the one
+		// thing a search box must never do.
+		out.putString(KEY_CLIP_QUERY, clipQuery);
 	}
 
 	@Override
@@ -328,12 +431,76 @@ public class MainActivity extends Activity {
 		super.onResume();
 		refresh();
 		startPolling();
+		registerClipboardListener();
+	}
+
+
+
+
+
+	/**
+	 * The clipboard changed while the app was in the foreground.
+	 *
+	 * <p>It is shown at once, from what the system just handed us, and the
+	 * module's history is asked for as well so the entry is still there
+	 * after the app is closed.
+	 */
+
+
+
+
+	/** Listen for the module saying the clipboard changed. */
+	private void registerClipboardListener() {
+		if (clipReceiver != null) {
+			return;
+		}
+		clipReceiver = new android.content.BroadcastReceiver() {
+			@Override
+			public void onReceive(android.content.Context c, android.content.Intent i) {
+				String a = i.getAction();
+				if ("com.paras.tailbridge.action.CLIPBOARD_CHANGED".equals(a)) {
+					refreshClipboardList();
+				} else {
+					// The daemon's state changed.
+					refresh();
+				}
+			}
+		};
+		android.content.IntentFilter f = new android.content.IntentFilter();
+		f.addAction("com.paras.tailbridge.action.CLIPBOARD_CHANGED");
+		f.addAction("com.paras.tailbridge.action.STATE_CHANGED");
+		try {
+			// Exported, deliberately.
+			//
+			// The sender is the module, which runs as root, and a
+			// receiver registered as not-exported only hears from the
+			// system and from this app -- so a private receiver would
+			// never hear the module at all, and the clipboard screen
+			// would only learn about a copy when the screen was pulled
+			// to refresh.
+			//
+			// Exposing it costs nothing: the action names this app, and
+			// all the receiver does is re-read the app's own history.
+			// Nothing is sent anywhere and nothing is granted.
+			registerReceiver(clipReceiver, f, android.content.Context.RECEIVER_EXPORTED);
+		} catch (Exception e) {
+			// The poll is still there; this is only the fast path.
+			clipReceiver = null;
+		}
 	}
 
 	@Override
 	protected void onPause() {
 		super.onPause();
 		stopPolling();
+		if (clipReceiver != null) {
+			try {
+				unregisterReceiver(clipReceiver);
+			} catch (Exception ignored) {
+				// Already gone.
+			}
+			clipReceiver = null;
+		}
 	}
 
 	@Override
@@ -349,7 +516,37 @@ public class MainActivity extends Activity {
 		ui.removeCallbacksAndMessages(null);
 	}
 
+	/**
+	 * The clipboard service, and the listener the app puts on it.
+	 *
+	 * <p>While the app is in the foreground the system lets the focused app
+	 * read the clipboard with the public API. That is the truth, it arrives
+	 * in-process the moment it changes, and it needs no root at all.
+	 *
+	 * <p>Going through the module instead meant every copy travelled
+	 * through a helper, a file, a broadcast and a root round trip, and
+	 * arrived seconds late -- a copy of the truth, read back out of
+	 * somebody else's notes. Root is needed for the two things the public
+	 * API cannot do: keeping the history going while the app is closed, and
+	 * putting something on the clipboard.
+	 */
+
+	/**
+	 * Told when the clipboard changes.
+	 *
+	 * <p>The module sends this the moment it records a copy. Without it the
+	 * clipboard screen only learned about a copy on the app's next poll,
+	 * which is up to five seconds later -- long enough that copying
+	 * something and watching the screen not change makes the whole thing
+	 * look broken.
+	 */
+	private android.content.BroadcastReceiver clipReceiver;
+
+	/** The tab on screen. */
+	private int currentTab = 0;
+
 	private void tab(int n) {
+		currentTab = n;
 		ScrollView[] scrolls = {
 				findViewById(R.id.scrollSend),
 				findViewById(R.id.scrollSettings),
@@ -370,6 +567,20 @@ public class MainActivity extends Activity {
 				label.setTextColor(c);
 				label.setTypeface(null, i == n ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
 			}
+			// The mark behind the selected tab's icon.
+			//
+			// The label changes colour, but colour alone is easy to miss
+			// on a small strip. A shape behind the icon makes the
+			// selected tab findable at a glance.
+			View pill = navs[i].findViewById(R.id.navPill);
+			if (pill != null) {
+				pill.setVisibility(i == n ? View.VISIBLE : View.INVISIBLE);
+			}
+		}
+		// The clipboard's floating buttons belong to the clipboard screen.
+		View acts = findViewById(R.id.clipActions);
+		if (acts != null) {
+			acts.setVisibility(n == 3 ? View.VISIBLE : View.GONE);
 		}
 	}
 
@@ -690,8 +901,8 @@ public class MainActivity extends Activity {
 					android.view.ViewGroup parent) {
 				android.view.View v = convert;
 				if (v == null) {
-					v = new android.widget.CheckBox(MainActivity.this);
-					android.widget.CheckBox cb = (android.widget.CheckBox) v;
+					v = toggle(false);
+					android.widget.Switch cb = (android.widget.Switch) v;
 					cb.setTextColor(getColor(enabled[i] ? R.color.text : R.color.hint));
 					cb.setTextSize(16);
 					cb.setPadding(dp(22), dp(14), dp(22), dp(14));
@@ -715,7 +926,7 @@ public class MainActivity extends Activity {
 					});
 					v = cb;
 				}
-				android.widget.CheckBox cb = (android.widget.CheckBox) v;
+				android.widget.Switch cb = (android.widget.Switch) v;
 				cb.setEnabled(enabled[i]);
 				cb.setAlpha(enabled[i] ? 1f : 0.45f);
 				cb.setText(labels[i]);
@@ -892,7 +1103,7 @@ public class MainActivity extends Activity {
 				: R.string.module_broken_short));
 		versionView.setText(noRoot ? getString(R.string.grant_root)
 				: getString(R.string.module_broken_hint));
-		dotView.getBackground().mutate().setTint(getColor(R.color.warn));
+		setStatusColor(getColor(R.color.warn));
 
 		pSend.removeAllViews();
 		pSettings.removeAllViews();
@@ -1006,6 +1217,24 @@ public class MainActivity extends Activity {
 	}
 
 	/** Paint the header from a status document. */
+	/**
+	 * The colour of the status light.
+	 *
+	 * <p>The dot and the disc behind it are set together: a dot of one colour
+	 * inside a halo of another would read as two separate things rather than
+	 * as one light.
+	 */
+	private void setStatusColor(int c) {
+		if (dotView != null) {
+			dotView.getBackground().mutate().setTint(c);
+		}
+		if (dotHaloView != null) {
+			dotHaloView.getBackground().mutate().setTint(c);
+			// The halo is the same colour, barely there.
+			dotHaloView.setAlpha(38);
+		}
+	}
+
 	private void applyHeader(JSONObject st) {
 		String backend = st.optString("backend", "?");
 		JSONObject self = st.optJSONObject("self");
@@ -1046,17 +1275,17 @@ public class MainActivity extends Activity {
 		// fine while login, relays and DNS quietly do not.
 		boolean controlPlane = self != null && self.optBoolean("online", false);
 		if (!up) {
-			dotView.getBackground().mutate().setTint(getColor(R.color.err));
+			setStatusColor(getColor(R.color.err));
 			versionView.setText(getString(R.string.state_daemon_stopped) + "  \u00b7  tailscaled "
 					+ st.optString("version", "?"));
 		} else if (!signedIn(st)) {
-			dotView.getBackground().mutate().setTint(getColor(R.color.warn));
+			setStatusColor(getColor(R.color.warn));
 		} else if (!controlPlane) {
-			dotView.getBackground().mutate().setTint(getColor(R.color.warn));
+			setStatusColor(getColor(R.color.warn));
 			versionView.setText(getString(R.string.state_no_internet) + "  \u00b7  tailscaled "
 					+ st.optString("version", "?"));
 		} else {
-			dotView.getBackground().mutate().setTint(getColor(R.color.ok));
+			setStatusColor(getColor(R.color.ok));
 		}
 	}
 
@@ -1101,17 +1330,101 @@ public class MainActivity extends Activity {
 					// offline or root gone; leave the screen as it is
 				}
 				final JSONObject fSt = st;
+				final String sig = bodySignature(st);
 				ui.post(() -> {
 					polling = false;
 					if (fSt != null) {
 						applyHeader(fSt);
 						patchNames(fSt);
+						// The header and the body have to agree.
+						//
+						// The poll updates the header every few seconds, but
+						// the body was only rebuilt on a manual refresh, so
+						// the two could say different things: the header
+						// saying "Connected" over a body saying "Not signed
+						// in". The body is rebuilt when what it depends on
+						// changes, and not otherwise -- rebuilding it every
+						// five seconds would throw away the scroll position
+						// and anything half typed.
+						if (!sig.equals(lastBodySignature)) {
+							lastBodySignature = sig;
+							// The panel is built from the status that was
+							// just fetched, not from the one it had before.
+							// Without this the body was rebuilt from stale
+							// data and showed the old state: a switch still
+							// ticked for a daemon that was stopped.
+							status = fSt;
+							rebuildVisible();
+						}
+						// The clipboard list changes on its own: a copy
+						// happens without the daemon or the app doing
+						// anything. It has to be fetched, not inferred
+						// from the daemon's status.
+						if (currentTab == 3) {
+							refreshClipboardList();
+						}
 					}
 				});
 			}).start();
 			ui.postDelayed(this, POLL_MS);
 		}
 	};
+
+	/** What the body of the screen was last built from. */
+	private String lastBodySignature = "\u0000none";
+
+	/**
+	 * A fingerprint of everything the body of the screen depends on.
+	 *
+	 * <p>The header is refreshed on every poll; the body is not, because
+	 * rebuilding it is expensive and throws away the scroll position. So the
+	 * body is rebuilt when this changes and not otherwise.
+	 */
+	private String bodySignature(JSONObject st) {
+		if (st == null) {
+			return "";
+		}
+		StringBuilder sb = new StringBuilder();
+		sb.append(st.optString("backend")).append('|');
+		sb.append(st.optString("daemon")).append('|');
+		for (Api.Peer p : Api.peersFrom(st)) {
+			sb.append(p.name).append(':').append(p.ip).append(':')
+					.append(p.online).append(',');
+		}
+		return sb.toString();
+	}
+
+	/**
+	 * Rebuild the panel that is on screen.
+	 *
+	 * <p>Only the visible one. The other panels keep their state, so a peer
+	 * coming online does not wipe half-typed text in a setting the user is
+	 * looking at.
+	 *
+	 * <p>The clipboard panel is left alone: its list has a search box in it,
+	 * and rebuilding it while somebody is typing would throw their query
+	 * away.
+	 */
+	private void rebuildVisible() {
+		switch (currentTab) {
+			case 0:
+				buildSend(Api.peersFrom(status));
+				break;
+			case 1:
+				buildSettings(status);
+				break;
+			case 2:
+				buildSystem(status);
+				break;
+			case 3:
+				// Only the list. The search box above it must survive, and
+				// the focus must stay where the user put it.
+				loadClipboard();
+				break;
+			default:
+				break;
+		}
+	}
 
 	/** The "N files arrived" note is fetched once per launch, not per render. */
 	private boolean receivedChecked;
@@ -1185,6 +1498,226 @@ public class MainActivity extends Activity {
 	// ------------------------------------------------------------ clipboard
 
 	/**
+	 * The clipboard's settings.
+	 *
+	 * <p>Read from the module, because the watcher is what they configure.
+	 * They are fetched separately from the daemon's status: the status is one
+	 * local read, while these live in the module's own configuration.
+	 */
+	private void buildClipboardSettings(LinearLayout g) {
+		new Thread(() -> {
+			try {
+				final JSONObject cfg = Api.clipboardConfig();
+				final JSONArray apps = Api.clipboardApps();
+				ui.post(() -> {
+					g.removeAllViews();
+					clipSettings(g, cfg, apps);
+				});
+			} catch (Exception e) {
+				ui.post(() -> {
+					g.removeAllViews();
+					note(g, getString(R.string.failed, String.valueOf(e.getMessage())));
+				});
+			}
+		}).start();
+	}
+
+	/** The clipboard's settings, drawn. */
+	private void clipSettings(LinearLayout g, JSONObject cfg, JSONArray apps) {
+		final boolean watch = cfg.optBoolean("watch", true);
+		final int max = cfg.optInt("max", 5000);
+		final String ignore = cfg.optString("ignore", "");
+
+		addSwitch(g, getString(R.string.clip_t_watch), getString(R.string.clip_d_watch),
+				watch, b -> {
+					new Thread(() -> {
+						try {
+							Api.clipboardSet("watch", b.isChecked() ? "true" : "false");
+							ui.post(() -> toast(getString(R.string.done)));
+						} catch (Exception e) {
+							ui.post(() -> toast(getString(R.string.failed,
+									String.valueOf(e.getMessage()))));
+						}
+					}).start();
+				});
+
+		// How much to keep.
+		//
+		// A number you can type, not a list to pick from. The list was
+		// three values, and a person who wants two thousand entries should
+		// not have to choose between one thousand and five thousand.
+		action(g, getString(R.string.clip_t_keep),
+				getString(R.string.clip_d_keep) + "  ·  " + getString(R.string.clip_kept, max),
+				v -> showKeepEditor(max));
+
+		// How long to keep it.
+		//
+		// A count on its own does not bound a history: five thousand
+		// copies a day for a year is a lot of text, and the entries that
+		// matter are the recent ones. Zero days means keep them for ever.
+		final int days = cfg.optInt("days", 0);
+		action(g, getString(R.string.clip_t_days),
+				getString(R.string.clip_d_days) + "  ·  " + getString(R.string.clip_kept_days, days),
+				v -> showDaysEditor(days));
+
+		action(g, getString(R.string.clip_clear), null, v -> confirmClearClipboard());
+	}
+
+
+
+
+
+
+
+
+
+	/**
+	 * How much history to keep.
+	 *
+	 * <p>A field with the number in it, so any number will do.
+	 */
+	private void showKeepEditor(int current) {
+		showNumberEditor(getString(R.string.clip_t_keep), String.valueOf(current),
+				10, 50000, n -> {
+					Api.clipboardSet("max", String.valueOf(n));
+				});
+	}
+
+	/** Something that sets a number, and may fail. */
+	private interface Setter {
+		void set(int n) throws Exception;
+	}
+
+	/**
+	 * A number to type in.
+	 *
+	 * <p>Used for both limits. The point of a field rather than a list of
+	 * choices is that the choice is not the point: how many entries to keep
+	 * is a number somebody sets once and forgets.
+	 */
+	private void showNumberEditor(String title, String value, int lo, int hi,
+			Setter onSet) {
+		final EditText in = new EditText(this);
+		in.setText(value);
+		in.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+		in.setTextColor(getColor(R.color.text));
+		in.setHintTextColor(getColor(R.color.hint));
+		in.setTextSize(16);
+		in.setSingleLine(true);
+		in.setPadding(dp(14), 0, dp(14), 0);
+		in.setBackgroundResource(R.drawable.field);
+		LinearLayout box = new LinearLayout(this);
+		box.setOrientation(LinearLayout.VERTICAL);
+		box.setPadding(dp(24), dp(8), dp(24), 0);
+		box.addView(in, new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
+
+		alert()
+				.setTitle(title)
+				.setView(box)
+				.setPositiveButton(android.R.string.ok, (d, w) -> {
+					String v = in.getText().toString().trim();
+					int n;
+					try {
+						n = Integer.parseInt(v);
+					} catch (NumberFormatException e) {
+						toast(getString(R.string.failed, v));
+						return;
+					}
+					if (n < lo || n > hi) {
+						toast(getString(R.string.clip_keep_range));
+						return;
+					}
+					new Thread(() -> {
+						try {
+							onSet.set(n);
+							ui.post(() -> {
+								toast(getString(R.string.done));
+								clipboardSettingsChanged();
+							});
+						} catch (Exception e) {
+							ui.post(() -> toast(getString(R.string.failed,
+									String.valueOf(e.getMessage()))));
+						}
+					}).start();
+				})
+				.setNegativeButton(android.R.string.cancel, null)
+				.show();
+	}
+
+	/**
+	 * The settings changed, so the panel that shows them has to be redrawn.
+	 *
+	 * <p>Without this the row kept saying the old number: the value was
+	 * changed and the screen still claimed it had not been.
+	 */
+	private void clipboardSettingsChanged() {
+		ui.post(() -> {
+			loadClipboard();
+			buildSettings(status);
+		});
+	}
+
+	/**
+	 * How long to keep the history.
+	 *
+	 * <p>A field with the number of days in it. Zero means for ever.
+	 */
+	private void showDaysEditor(int current) {
+		showNumberEditor(getString(R.string.clip_t_days), String.valueOf(current),
+				0, 3650, n -> {
+					Api.clipboardSet("days", String.valueOf(n));
+				});
+	}
+
+	/** How much history to keep. */
+	private void showKeepChooser(int current) {
+		final int[] options = { 500, 1000, 5000 };
+		String[] labels = new String[options.length];
+		for (int i = 0; i < options.length; i++) {
+			labels[i] = getString(R.string.clip_kept, options[i]);
+		}
+		alert()
+				.setTitle(R.string.clip_t_keep)
+				.setSingleChoiceItems(labels, indexOf(options, current), (d, which) -> {
+					d.dismiss();
+					new Thread(() -> {
+						try {
+							Api.clipboardSet("max", String.valueOf(options[which]));
+							ui.post(() -> {
+								toast(getString(R.string.done));
+								loadClipboard();
+							});
+						} catch (Exception e) {
+							ui.post(() -> toast(getString(R.string.failed,
+									String.valueOf(e.getMessage()))));
+						}
+					}).start();
+				})
+				.setNegativeButton(android.R.string.cancel, null)
+				.show();
+	}
+
+	private static int indexOf(int[] a, int v) {
+		for (int i = 0; i < a.length; i++) {
+			if (a[i] == v) {
+				return i;
+			}
+		}
+		return 0;
+	}
+
+	/** Delete everything, after asking. */
+	private void confirmClearClipboard() {
+		alert()
+				.setTitle(R.string.clip_clear)
+				.setMessage(R.string.clip_clear_confirm)
+				.setPositiveButton(R.string.clip_clear, (d, w) -> clearClipboard())
+				.setNegativeButton(android.R.string.cancel, null)
+				.show();
+	}
+
+	/**
 	 * The clipboard history.
 	 *
 	 * <p>Loaded separately from the status, because it is a different size of
@@ -1205,9 +1738,13 @@ public class MainActivity extends Activity {
 	/** One history entry, as the module recorded it. */
 	private static final class ClipEntry {
 		long time;
-		String textB64 = "";
+		/** The text, decoded once when the entry is read. */
+		String text = "";
 		String source = "";
 		boolean fromPeer;
+		/** Starred: a limit never removes it, and only the person who
+		 *  starred it can unstar it. */
+		boolean starred;
 	}
 
 	private static List<ClipEntry> clipsFrom(JSONArray arr) {
@@ -1222,21 +1759,27 @@ public class MainActivity extends Activity {
 			}
 			ClipEntry e = new ClipEntry();
 			e.time = o.optLong("t", 0);
-			e.textB64 = o.optString("c", "");
+			e.text = decode(o.optString("c", ""));
 			e.source = o.optString("s", "");
 			e.fromPeer = o.optInt("d", 0) == 1;
+			e.starred = o.optInt("p", 0) == 1;
 			out.add(e);
 		}
 		return out;
 	}
 
-	private static String clipText(ClipEntry e) {
+	/** Base64 text, decoded. */
+	private static String decode(String b64) {
 		try {
-			return new String(android.util.Base64.decode(e.textB64,
+			return new String(android.util.Base64.decode(b64,
 					android.util.Base64.DEFAULT), "UTF-8");
 		} catch (Exception ex) {
 			return "";
 		}
+	}
+
+	private static String clipText(ClipEntry e) {
+		return e.text;
 	}
 
 	private void renderClipboard(JSONArray arr) {
@@ -1246,11 +1789,16 @@ public class MainActivity extends Activity {
 		pClip.removeAllViews();
 
 		List<ClipEntry> entries = clipsFrom(arr);
-		LinearLayout g = group(pClip, getString(R.string.clip_heading));
+		clipEntries = entries;
 
-		// What is on the clipboard right now, and the button that sends it.
-		action(g, getString(R.string.clip_now), null, v -> showClipboardNow());
-		action(g, getString(R.string.clip_send_all), null, v -> sendClipboardToAll());
+		// The search box, and nothing else.
+		//
+		// The list is what this screen is for. Everything else that used
+		// to sit above it -- a switch on its own row, a paragraph about
+		// root -- pushed the list down the screen.
+		LinearLayout g = group(pClip, null);
+		g.setPadding(dp(2), dp(2), dp(2), 0);
+		searchField(g, entries);
 
 		if (entries.isEmpty()) {
 			note(pClip, arr == null
@@ -1259,23 +1807,501 @@ public class MainActivity extends Activity {
 			return;
 		}
 
-		LinearLayout h = group(pClip, getString(R.string.clip_entry_count, entries.size()));
-		for (ClipEntry e : entries) {
-			String body = clipText(e);
-			String shown = body.replace('\n', ' ').trim();
-			if (shown.length() > 70) {
-				shown = shown.substring(0, 70) + "…";
-			}
-			if (shown.isEmpty()) {
-				shown = getString(R.string.clip_now_empty);
-			}
-			String who = e.fromPeer
-					? getString(R.string.clip_from_peer)
-					: (e.source.isEmpty() ? getString(R.string.clip_no_source) : e.source);
-			action(h, shown, who, v -> showClipEntry(e));
-		}
+		// The entries.
+		//
+		// Each row carries the icon of the app it came from. A list of
+		// package names is a list of nothing a person can read; an icon and
+		// a name is a list of the things they actually copied.
+		// The heading: how many there are on the left, and the switch
+		// that turns recording on and off on the right.
+		//
+		// A switch on its own with nothing next to it says nothing. Here
+		// it has a word beside it, so it is obvious what it does, and it
+		// costs the list no vertical space at all.
+		LinearLayout head = new LinearLayout(this);
+		head.setOrientation(LinearLayout.HORIZONTAL);
+		head.setGravity(Gravity.CENTER_VERTICAL);
+		head.setPadding(dp(4), dp(20), dp(4), dp(8));
+
+		// The star that shows only the starred entries.
+		//
+		// Starred entries are the ones somebody decided to keep, so
+		// they need to be reachable at once rather than hunted for in a
+		// list that grows.
+		ImageView only = new ImageView(this);
+		only.setImageResource(R.drawable.ic_star);
+		only.setColorFilter(getColor(clipStarOnly ? R.color.accent : R.color.hint));
+		only.setPadding(dp(8), dp(8), dp(8), dp(8));
+		only.setContentDescription(getString(R.string.clip_starred_only));
+		only.setOnClickListener(v -> {
+			clipStarOnly = !clipStarOnly;
+			only.setColorFilter(getColor(clipStarOnly ? R.color.accent : R.color.hint));
+			refreshClipList();
+		});
+		head.addView(only, new LinearLayout.LayoutParams(dp(34), dp(34)));
+
+		clipListHeading = new TextView(this);
+		clipListHeading.setTextColor(getColor(R.color.hint));
+		clipListHeading.setTextSize(11f);
+		clipListHeading.setTypeface(null, android.graphics.Typeface.BOLD);
+		clipListHeading.setAllCaps(true);
+		clipListHeading.setLetterSpacing(0.1f);
+		clipListHeading.setIncludeFontPadding(false);
+		head.addView(clipListHeading, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+		clipSwitch(head);
+		pClip.addView(head);
+
+		clipList = new LinearLayout(this);
+		clipList.setOrientation(LinearLayout.VERTICAL);
+		pClip.addView(clipList);
+		refreshClipList();
+
+		// The note about root goes at the bottom. It is reference, not
+		// something to read before using the screen.
+		note(pClip, getString(R.string.clip_needs_root));
 
 		action(pClip, getString(R.string.clip_clear), null, v -> clearClipboard());
+	}
+
+	/** One entry of the history: what was copied, and which app copied it. */
+	private void clipRow(LinearLayout g, ClipEntry e) {
+		line(g);
+		LinearLayout row = row();
+		row.setBackgroundResource(R.drawable.row_press);
+		row.setClickable(true);
+
+		// The app's icon.
+		ImageView ic = new ImageView(this);
+		android.graphics.drawable.Drawable d = appIcon(e.source);
+		if (d != null) {
+			ic.setImageDrawable(d);
+		} else {
+			ic.setImageResource(R.drawable.ic_clip);
+			ic.setColorFilter(getColor(R.color.hint));
+		}
+		LinearLayout.LayoutParams icp = new LinearLayout.LayoutParams(dp(22), dp(22));
+		icp.setMargins(0, 0, dp(12), 0);
+		row.addView(ic, icp);
+
+		LinearLayout col = col();
+		TextView t = new TextView(this);
+		t.setText(clipShown(e));
+		t.setTextColor(getColor(R.color.text));
+		t.setTextSize(14.5f);
+		t.setMaxLines(2);
+		t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+		col.addView(t);
+
+		TextView sub = new TextView(this);
+		sub.setText(clipSource(e));
+		sub.setTextColor(getColor(R.color.hint));
+		sub.setTextSize(12f);
+		sub.setPadding(0, dp(3), 0, 0);
+		col.addView(sub);
+
+		row.addView(col, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+		// The star.
+		//
+		// A starred entry is one the person decided to keep, so the
+		// limits never remove it and only they can unstar it.
+		ImageView star = new ImageView(this);
+		star.setImageResource(R.drawable.ic_star);
+		star.setColorFilter(getColor(e.starred ? R.color.accent : R.color.hint));
+		star.setPadding(dp(9), dp(9), dp(4), dp(9));
+		star.setContentDescription(getString(R.string.clip_star));
+		star.setOnClickListener(v -> toggleStar(e, star));
+		row.addView(star, new LinearLayout.LayoutParams(dp(36), dp(40)));
+
+		row.setOnClickListener(v -> showClipEntry(e));
+		// A long press is the way things are deleted on a phone, and it
+		// leaves the tap free for reading the entry.
+		row.setOnLongClickListener(v -> {
+			clipRowMenu(e);
+			return true;
+		});
+		g.addView(row);
+	}
+
+	/** Star an entry, or unstar it. */
+	private void toggleStar(ClipEntry e, ImageView star) {
+		new Thread(() -> {
+			try {
+				Api.clipboardStar(e.time, !e.starred);
+				ui.post(() -> {
+					toast(getString(R.string.done));
+					refreshClipboardList();
+				});
+			} catch (Exception ex) {
+				ui.post(() -> toast(getString(R.string.failed,
+						String.valueOf(ex.getMessage()))));
+			}
+		}).start();
+	}
+
+	/** What a long press on an entry offers. */
+	private void clipRowMenu(ClipEntry e) {
+		alert()
+				.setTitle(clipShown(e))
+				.setItems(new CharSequence[] {
+						getString(R.string.clip_copy),
+						getString(R.string.clip_send_to),
+						getString(R.string.clip_delete),
+				}, (d, which) -> {
+					switch (which) {
+						case 0:
+							copyToClipboard(clipText(e));
+							break;
+						case 1:
+							showClipEntry(e);
+							break;
+						case 2:
+							confirmDeleteClip(e);
+							break;
+					}
+				})
+				.show();
+	}
+
+	/** Delete one entry, after asking. */
+	private void confirmDeleteClip(ClipEntry e) {
+		alert()
+				.setTitle(R.string.clip_delete)
+				.setMessage(R.string.clip_delete_confirm)
+				.setPositiveButton(R.string.clip_delete, (d, w) -> {
+					new Thread(() -> {
+						try {
+							Api.clipboardDelete(e.time);
+							ui.post(() -> {
+								toast(getString(R.string.done));
+								refreshClipboardList();
+							});
+						} catch (Exception ex) {
+							ui.post(() -> toast(getString(R.string.failed,
+									String.valueOf(ex.getMessage()))));
+						}
+					}).start();
+				})
+				.setNegativeButton(android.R.string.cancel, null)
+				.show();
+	}
+
+	/** Put some text on the clipboard. */
+	private void copyToClipboard(String text) {
+		try {
+			android.content.ClipboardManager cm =
+					(android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+			cm.setPrimaryClip(android.content.ClipData.newPlainText("TailBridge", text));
+			toast(getString(R.string.clip_copied));
+		} catch (Exception e) {
+			toast(getString(R.string.failed, String.valueOf(e.getMessage())));
+		}
+	}
+
+	/**
+	 * The two floating buttons on the clipboard screen.
+	 *
+	 * <p>They live in the corner, over the list, and they are the only way
+	 * to act on what is on the clipboard.
+	 */
+	private void wireClipButtons() {
+		View send = findViewById(R.id.clipSendFab);
+		View now = findViewById(R.id.clipNowFab);
+		if (send != null) {
+			send.setOnClickListener(v -> confirmSendClipboard());
+		}
+		if (now != null) {
+			now.setOnClickListener(v -> showClipboardNow());
+		}
+	}
+
+	/**
+	 * Fetch the history and redraw the list.
+	 *
+	 * <p>Only the list. The search box above it must keep its text and its
+	 * focus, so the whole panel is never rebuilt.
+	 *
+	 * <p>The poll calls this while the clipboard screen is open, so a copy
+	 * shows up without anybody having to pull to refresh. Without it the
+	 * screen showed a history that was minutes out of date, and a copy that
+	 * had plainly been recorded looked like it had not been.
+	 */
+	private void refreshClipboardList() {
+		new Thread(() -> {
+			try {
+				final JSONArray arr = Api.clipboardList();
+				ui.post(() -> {
+					clipEntries = clipsFrom(arr);
+					refreshClipList();
+				});
+			} catch (Exception ignored) {
+				// Leave what is on screen; the next poll tries again.
+			}
+		}).start();
+	}
+
+	/** The entries the list is showing. */
+	private List<ClipEntry> clipEntries = new ArrayList<>();
+	/** What is in the search box. */
+	private String clipQuery = "";
+	private static final String KEY_CLIP_QUERY = "clipQuery";
+	/** Whether the list is showing only the starred entries. */
+	private boolean clipStarOnly = false;
+
+	/**
+	 * Redraw the list, and nothing else.
+	 *
+	 * <p>The search box and the switch above it are left alone, so a copy
+	 * that arrives while somebody is typing does not throw their query away
+	 * or take the focus out of the field.
+	 */
+	private void refreshClipList() {
+		if (clipList == null || clipListHeading == null) {
+			return;
+		}
+		String q = clipQuery;
+		List<ClipEntry> shown = clipFiltered(clipEntries, q);
+		if (clipStarOnly) {
+			List<ClipEntry> starred = new ArrayList<>();
+			for (ClipEntry e : shown) {
+				if (e.starred) {
+					starred.add(e);
+				}
+			}
+			shown = starred;
+		}
+
+		// The same text twice is one entry, not two.
+		List<ClipEntry> merged = new ArrayList<>();
+		String last = null;
+		for (ClipEntry e : shown) {
+			if (e.text.equals(last)) {
+				continue;
+			}
+			last = e.text;
+			merged.add(e);
+		}
+		shown = merged;
+		clipListHeading.setText(getString(R.string.clip_entry_count, shown.size()));
+		clipList.removeAllViews();
+		for (ClipEntry e : shown) {
+			clipRow(clipList, e);
+		}
+	}
+
+	/**
+	 * The switch that turns recording on and off.
+	 *
+	 * <p>It sits at the end of the search box rather than in a row of its
+	 * own. A row with a title and a description would push the list down
+	 * the screen, and the list is the whole point of this screen.
+	 */
+	private void clipSwitch(LinearLayout g) {
+		new Thread(() -> {
+			try {
+				final JSONObject cfg = Api.clipboardConfig();
+				ui.post(() -> {
+					if (g == null) {
+						return;
+					}
+					final boolean watch = cfg.optBoolean("watch", true);
+					// The word beside the switch. Without it the switch
+					// is a mystery: a small control that nobody can
+					// tell what it is for.
+					LinearLayout box = new LinearLayout(this);
+					box.setOrientation(LinearLayout.HORIZONTAL);
+					box.setGravity(Gravity.CENTER_VERTICAL);
+
+					android.widget.Switch sw = toggle(watch);
+					sw.setContentDescription(getString(R.string.clip_t_watch));
+					sw.setOnCheckedChangeListener((b, checked) -> {
+						((android.widget.Switch) b).setThumbTintList(android.content.res.ColorStateList.valueOf(
+								getColor(checked ? R.color.text : R.color.hint)));
+						new Thread(() -> {
+							try {
+								Api.clipboardSet("watch", checked ? "true" : "false");
+								ui.post(() -> toast(getString(R.string.done)));
+							} catch (Exception e) {
+								ui.post(() -> toast(getString(R.string.failed,
+										String.valueOf(e.getMessage()))));
+							}
+						}).start();
+					});
+					box.addView(sw, new LinearLayout.LayoutParams(
+							ViewGroup.LayoutParams.WRAP_CONTENT, dp(40)));
+
+					TextView lbl = new TextView(this);
+					lbl.setText(getString(R.string.clip_recording));
+					lbl.setTextColor(getColor(watch ? R.color.text2 : R.color.hint));
+					lbl.setTextSize(12f);
+					lbl.setIncludeFontPadding(false);
+					lbl.setPadding(dp(7), 0, 0, 0);
+					box.addView(lbl);
+
+					g.addView(box, new LinearLayout.LayoutParams(
+							ViewGroup.LayoutParams.WRAP_CONTENT, dp(40)));
+				});
+			} catch (Exception e) {
+				ui.post(() -> note(g, getString(R.string.failed,
+						String.valueOf(e.getMessage()))));
+			}
+		}).start();
+	}
+
+	/** The text of an entry, on one line for the list. */
+	private String clipShown(ClipEntry e) {
+		String body = clipText(e).replace('\n', ' ').trim();
+		if (body.isEmpty()) {
+			return getString(R.string.clip_now_empty);
+		}
+		return body;
+	}
+
+	/** Which app an entry came from, and when. */
+	private String clipSource(ClipEntry e) {
+		String who;
+		if (e.fromPeer) {
+			who = getString(R.string.clip_from_peer);
+		} else if ("com.android.shell".equals(e.source)) {
+			// The shell user is how the module reads and writes the
+			// clipboard, so this entry was put there by the module itself
+			// rather than by an app.
+			who = getString(R.string.clip_by_module);
+		} else if (e.source.isEmpty()) {
+			who = getString(R.string.clip_no_source);
+		} else {
+			who = appLabel(e.source);
+		}
+		return who + "  ·  " + clipTime(e.time);
+	}
+
+	/** A time, said the way a person would. */
+	private String clipTime(long ms) {
+		if (ms <= 0) {
+			return "";
+		}
+		long diff = System.currentTimeMillis() - ms;
+		if (diff < 60_000) {
+			return getString(R.string.clip_just_now);
+		}
+		if (diff < 3_600_000) {
+			return (diff / 60_000) + "m";
+		}
+		if (diff < 86_400_000) {
+			return (diff / 3_600_000) + "h";
+		}
+		return (diff / 86_400_000) + "d";
+	}
+
+	/**
+	 * The search box.
+	 *
+	 * <p>It filters the list as it is typed, and it is the only control on
+	 * this screen, so it gets the top of it.
+	 */
+	private LinearLayout searchField(LinearLayout g, List<ClipEntry> entries) {
+		// The search box and the recording switch share one row, so the
+		// switch costs no vertical space and the list starts as high as
+		// it can.
+		LinearLayout row = new LinearLayout(this);
+		row.setOrientation(LinearLayout.HORIZONTAL);
+		row.setGravity(Gravity.CENTER_VERTICAL);
+
+		LinearLayout box = new LinearLayout(this);
+		box.setOrientation(LinearLayout.HORIZONTAL);
+		box.setGravity(Gravity.CENTER_VERTICAL);
+		box.setBackgroundResource(R.drawable.field);
+		box.setPadding(dp(12), 0, dp(12), 0);
+
+		ImageView ic = new ImageView(this);
+		ic.setImageResource(R.drawable.ic_search);
+		LinearLayout.LayoutParams icp = new LinearLayout.LayoutParams(dp(18), dp(18));
+		icp.setMargins(0, 0, dp(10), 0);
+		box.addView(ic, icp);
+
+		final EditText in = new EditText(this);
+		if (!clipQuery.isEmpty()) {
+			in.setText(clipQuery);
+		}
+		in.setHint(getString(R.string.clip_search_hint));
+		in.setSingleLine(true);
+		in.setTextColor(getColor(R.color.text));
+		in.setHintTextColor(getColor(R.color.hint));
+		in.setTextSize(14.5f);
+		in.setPadding(0, 0, 0, 0);
+		in.setBackgroundColor(0x00000000);
+		box.addView(in, new LinearLayout.LayoutParams(0, dp(46), 1f));
+
+		row.addView(box, new LinearLayout.LayoutParams(0, dp(46), 1f));
+
+		LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
+		bp.bottomMargin = dp(4);
+		g.addView(row, bp);
+
+		in.addTextChangedListener(new android.text.TextWatcher() {
+			@Override public void beforeTextChanged(CharSequence c, int a, int b, int d) {}
+			@Override public void onTextChanged(CharSequence c, int a, int b, int d) {}
+			@Override public void afterTextChanged(android.text.Editable e) {
+				clipQuery = e.toString().trim().toLowerCase();
+				refreshClipList();
+			}
+		});
+		return row;
+	}
+
+	/** The entries that match a search. */
+	private List<ClipEntry> clipFiltered(List<ClipEntry> entries, String q) {
+		List<ClipEntry> out = new ArrayList<>();
+		for (ClipEntry e : entries) {
+			if (q.isEmpty()
+					|| clipText(e).toLowerCase().contains(q)
+					|| appLabel(e.source).toLowerCase().contains(q)) {
+				out.add(e);
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * Ask before sending the clipboard to everybody.
+	 *
+	 * <p>The clipboard is whatever was last copied, and that is very often a
+	 * password, a one-time code or a private message. Sending it to a
+	 * machine is the point; sending it to the wrong machine by accident is
+	 * not something to make easy, so the content is shown first.
+	 */
+	private void confirmSendClipboard() {
+		new Thread(() -> {
+			try {
+				final JSONObject now = Api.clipboardNow();
+				ui.post(() -> {
+					String b64 = now.optString("text", "");
+					String body = "";
+					try {
+						body = new String(android.util.Base64.decode(b64,
+								android.util.Base64.DEFAULT), "UTF-8");
+					} catch (Exception ignored) {
+					}
+					if (body.isEmpty()) {
+						toast(getString(R.string.clip_now_empty));
+						return;
+					}
+					String shown = body.length() > 240 ? body.substring(0, 240) + "…" : body;
+					alert()
+							.setTitle(R.string.clip_send_all)
+							.setMessage(getString(R.string.clip_send_confirm, shown))
+							.setPositiveButton(R.string.clip_send, (d, w) -> sendClipboardToAll())
+							.setNegativeButton(android.R.string.cancel, null)
+							.show();
+				});
+			} catch (Exception e) {
+				ui.post(() -> toast(getString(R.string.failed, String.valueOf(e.getMessage()))));
+			}
+		}).start();
 	}
 
 	/** The clipboard as it is right now. */
@@ -1394,7 +2420,17 @@ public class MainActivity extends Activity {
 		// Unauthenticated is the most common first-run state, and it is useless
 		// without a clear next step: say so up front rather than leaving an empty
 		// device list to puzzle over.
-		if (!signedIn(status)) {
+		// A daemon that is not running is a different thing from a daemon
+		// that is running and signed out.
+		//
+		// With the daemon stopped there is nobody signed in and nobody
+		// signed out, and saying "not signed in" sends the user to the
+		// sign-in screen for a problem that signing in cannot fix. The
+		// header already says the daemon is stopped; this says what to do
+		// about it.
+		if (!daemonUp(status)) {
+			stoppedCard();
+		} else if (!signedIn(status)) {
 			signInCard();
 		}
 
@@ -1504,6 +2540,49 @@ public class MainActivity extends Activity {
 	}
 
 	/** Big, obvious, and the only thing that matters before signing in. */
+	/** The card shown when the daemon is not running. */
+	private void stoppedCard() {
+		LinearLayout card = new LinearLayout(this);
+		card.setOrientation(LinearLayout.VERTICAL);
+		card.setBackgroundResource(R.drawable.group);
+		card.setPadding(dp(20), dp(22), dp(20), dp(20));
+		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		lp.bottomMargin = dp(8);
+		pSend.addView(card, lp);
+
+		TextView t = new TextView(this);
+		t.setText(R.string.daemon_stopped_card);
+		t.setTextColor(getColor(R.color.text));
+		t.setTextSize(21);
+		t.setTypeface(null, android.graphics.Typeface.BOLD);
+		t.setIncludeFontPadding(false);
+		card.addView(t);
+
+		TextView d = new TextView(this);
+		d.setText(R.string.daemon_stopped_card_body);
+		d.setTextColor(getColor(R.color.text2));
+		d.setTextSize(14);
+		d.setLineSpacing(dp(4), 1f);
+		d.setPadding(0, dp(8), 0, 0);
+		card.addView(d);
+
+		TextView go = new TextView(this);
+		go.setText(R.string.start_daemon);
+		go.setTextColor(getColor(R.color.onAccent));
+		go.setTextSize(16);
+		go.setGravity(Gravity.CENTER);
+		go.setTypeface(null, android.graphics.Typeface.BOLD);
+		go.setBackgroundResource(R.drawable.btn_primary);
+		go.setPadding(dp(16), dp(15), dp(16), dp(15));
+		go.setClickable(true);
+		go.setOnClickListener(v -> service("start"));
+		LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		glp.topMargin = dp(20);
+		card.addView(go, glp);
+	}
+
 	private void signInCard() {
 		boolean up = daemonUp(status);
 		LinearLayout card = new LinearLayout(this);
@@ -1603,13 +2682,12 @@ public class MainActivity extends Activity {
 		dotLp.rightMargin = dp(10);
 		row.addView(dot, dotLp);
 
-		CheckBox cb = new CheckBox(this);
+		android.widget.Switch cb = toggle(up && chosen.contains(p.name));
 		// Force-clear an offline peer rather than only disabling it: a ticked
-		// box next to a red dot reads as "this will be sent".
-		cb.setChecked(up && chosen.contains(p.name));
+		// switch next to a red dot reads as "this will be sent".
 		cb.setEnabled(up);
 		cb.setAlpha(up ? 1f : 0.4f);
-		cb.setButtonTintList(android.content.res.ColorStateList.valueOf(
+		cb.setThumbTintList(android.content.res.ColorStateList.valueOf(
 				getColor(up && chosen.contains(p.name) ? R.color.text : R.color.hint)));
 		row.addView(cb);
 
@@ -2028,6 +3106,16 @@ public class MainActivity extends Activity {
 		addToggle(c3, "snat-subnet-routes", getString(R.string.t_snat),
 				getString(R.string.d_snat), flags, online);
 
+		// The clipboard.
+		//
+		// A clipboard history is a record of whatever passed through the
+		// clipboard, and a lot of that is secret: a password from a password
+		// manager, a one-time code, a line from a private message. So the
+		// settings here are about what gets kept and what gets ignored,
+		// not about a colour.
+		LinearLayout c4 = group(pSettings, getString(R.string.clip_settings));
+		buildClipboardSettings(c4);
+
 		// device name
 		LinearLayout hr = new LinearLayout(this);
 		hr.setOrientation(LinearLayout.HORIZONTAL);
@@ -2064,7 +3152,7 @@ public class MainActivity extends Activity {
 
 	private void addToggle(LinearLayout g, String key, String label, String desc,
 			Map<String, Boolean> flags, boolean online) {
-		CheckBox sw = addSwitch(g, label, desc, flags.getOrDefault(key, false), v -> {
+		android.widget.Switch sw = addSwitch(g, label, desc, flags.getOrDefault(key, false), v -> {
 			if (online) {
 				applyPref(key, String.valueOf(v.isChecked()), label);
 			} else {
@@ -2089,7 +3177,7 @@ public class MainActivity extends Activity {
 				ui.post(() -> {
 					toast(getString(R.string.failed, String.valueOf(e.getMessage())));
 					// Put the switch back: the change did not stick.
-					CheckBox sw = switches.get(key);
+					android.widget.Switch sw = switches.get(key);
 					if (sw != null) {
 						sw.setOnCheckedChangeListener(null);
 						sw.setChecked(!sw.isChecked());
@@ -2588,12 +3676,13 @@ public class MainActivity extends Activity {
 		if (heading != null) {
 			TextView t = new TextView(this);
 			t.setText(heading);
-			t.setTextColor(getColor(R.color.text2));
-			t.setTextSize(12);
+			t.setTextColor(getColor(R.color.hint));
+			t.setTextSize(11);
 			t.setTypeface(null, android.graphics.Typeface.BOLD);
 			t.setAllCaps(true);
-			t.setLetterSpacing(0.08f);
-			t.setPadding(dp(4), dp(20), 0, dp(8));
+			t.setLetterSpacing(0.1f);
+			t.setIncludeFontPadding(false);
+			t.setPadding(dp(4), dp(22), 0, dp(10));
 			parent.addView(t);
 		} else {
 			LinearLayout.LayoutParams s = new LinearLayout.LayoutParams(
@@ -2695,6 +3784,7 @@ public class MainActivity extends Activity {
 		t.setText(title);
 		t.setTextColor(getColor(R.color.text));
 		t.setTextSize(15);
+		t.setIncludeFontPadding(false);
 		t.setSingleLine(true);
 		t.setEllipsize(android.text.TextUtils.TruncateAt.END);
 		col.addView(t);
@@ -2704,7 +3794,9 @@ public class MainActivity extends Activity {
 			s.setId(R.id.rowSub);
 			s.setText(sub);
 			s.setTextColor(getColor(R.color.text2));
-			s.setTextSize(12);
+			s.setTextSize(12.5f);
+			s.setIncludeFontPadding(false);
+			s.setPadding(0, dp(3), 0, 0);
 			col.addView(s);
 		}
 
@@ -2724,7 +3816,7 @@ public class MainActivity extends Activity {
 	}
 
 	/** A row with a trailing switch. Returns it so a failed write can be undone. */
-	private CheckBox addSwitch(LinearLayout g, String title, String sub, boolean on,
+	private android.widget.Switch addSwitch(LinearLayout g, String title, String sub, boolean on,
 			OnChecked l) {
 		line(g);
 		LinearLayout row = row();
@@ -2735,6 +3827,7 @@ public class MainActivity extends Activity {
 		t.setText(title);
 		t.setTextColor(getColor(R.color.text));
 		t.setTextSize(15);
+		t.setIncludeFontPadding(false);
 		col.addView(t);
 
 		if (sub != null && !sub.isEmpty()) {
@@ -2742,21 +3835,20 @@ public class MainActivity extends Activity {
 			s.setId(R.id.rowSub);
 			s.setText(sub);
 			s.setTextColor(getColor(R.color.text2));
-			s.setTextSize(12);
+			s.setTextSize(12.5f);
+			s.setIncludeFontPadding(false);
+			s.setPadding(0, dp(3), 0, 0);
 			col.addView(s);
 		}
 		row.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-		CheckBox sw = new CheckBox(this);
-		sw.setButtonTintList(android.content.res.ColorStateList.valueOf(
-				getColor(on ? R.color.text : R.color.hint)));
-		sw.setChecked(on);
+		android.widget.Switch sw = toggle(on);
 		row.addView(sw);
 
 		// Set the value before wiring the listener so painting the screen can
 		// never be mistaken for the user flipping it.
 		sw.setOnCheckedChangeListener((CompoundButton b, boolean checked) -> {
-			b.setButtonTintList(android.content.res.ColorStateList.valueOf(
+			((android.widget.Switch) b).setThumbTintList(android.content.res.ColorStateList.valueOf(
 					getColor(checked ? R.color.text : R.color.hint)));
 			if (l != null) {
 				l.on(b);
@@ -2785,7 +3877,7 @@ public class MainActivity extends Activity {
 		LinearLayout row = new LinearLayout(this);
 		row.setOrientation(LinearLayout.HORIZONTAL);
 		row.setGravity(Gravity.CENTER_VERTICAL);
-		row.setPadding(dp(16), dp(14), dp(16), dp(14));
+		row.setPadding(dp(16), dp(15), dp(16), dp(15));
 		return row;
 	}
 
@@ -2803,9 +3895,9 @@ public class MainActivity extends Activity {
 		TextView t = new TextView(this);
 		t.setText(text);
 		t.setTextColor(getColor(R.color.hint));
-		t.setTextSize(12);
+		t.setTextSize(12.5f);
 		t.setLineSpacing(dp(4), 1f);
-		t.setPadding(dp(4), dp(16), dp(4), 0);
+		t.setPadding(dp(4), dp(14), dp(4), 0);
 		parent.addView(t);
 	}
 

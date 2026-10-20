@@ -33,7 +33,7 @@ CLASS="${TS_CLIP_CLASS:-com.paras.tailbridge.clip.ClipBoard}"
 # How many entries to keep, and how many bytes the file may reach. Both are
 # limits, not targets: a clipboard history that grows without bound is a
 # problem that only shows up much later, on a phone that is already full.
-MAX_ENTRIES="${TS_CLIP_MAX_ENTRIES:-5000}"
+MAX_ENTRIES="${TS_CLIP_MAX_ENTRIES:-}"
 MAX_BYTES="${TS_CLIP_MAX_BYTES:-8388608}"
 
 # Milliseconds since the epoch. toybox's date does not always understand
@@ -101,24 +101,94 @@ append_entry() {
 	fi
 
 	printf '%s\n' "$_json" >> "$STORE" 2>/dev/null
+
+	# Tell the app, if it is open.
+	#
+	# Without this the clipboard screen only learns about a copy when the
+	# app's next poll runs, which is up to five seconds later. Copying
+	# something and watching the screen not change for five seconds makes
+	# the whole thing look broken.
+	#
+	# A broadcast is the right shape for this: the app is usually not
+	# running, so there is nothing to poll, and when it is running it wants
+	# to know the moment something changes.
+	# This is a nudge, not the mechanism: the app reads the
+	# clipboard itself while it is in the foreground, so it
+	# already knows. The nudge is for the case where the app
+	# was asleep when the copy happened.
+	#
+	# It is sent in the background on purpose. `am` takes a
+	# second or two to start, and running it here would hold
+	# up the next copy behind it.
+	( am broadcast -a com.paras.tailbridge.action.CLIPBOARD_CHANGED \
+		-p com.paras.tailbridge >/dev/null 2>&1 & ) || true
 	return 0
 }
 
 # prune -- drop the oldest entries until the store is within its limits.
 prune() {
 	[ -f "$STORE" ] || return 0
+	# The limits are settings, so they are read here rather than fixed.
+	MAX_ENTRIES="$(clip_conf max 5000)"
+	case "$MAX_ENTRIES" in '' | *[!0-9]*) MAX_ENTRIES=5000 ;; esac
+	MAX_DAYS="$(clip_conf days 0)"
+	case "$MAX_DAYS" in '' | *[!0-9]*) MAX_DAYS=0 ;; esac
 	_bytes="$(wc -c < "$STORE" 2>/dev/null || echo 0)"
 	case "$_bytes" in '' | *[!0-9]*) _bytes=0 ;; esac
 	_lines="$(wc -l < "$STORE" 2>/dev/null || echo 0)"
 	case "$_lines" in '' | *[!0-9]*) _lines=0 ;; esac
 
+	# By age.
+	#
+	# A count alone does not bound a history: five thousand copies a day
+	# for a year is a lot of text, and the entries that matter are the
+	# recent ones. Zero days means keep them for ever.
+	#
+	# The store is append-only, so the oldest entry is the first line and
+	# the newest is the last. Everything below drops from the front: the
+	# oldest first, always.
+	if [ "$MAX_DAYS" -gt 0 ]; then
+		_cutoff=$(( $(now_ms) - MAX_DAYS * 86400000 ))
+		_oldest="$("${TS_BIN_DIR}/jq" -r '(.t // 0) | tostring' "$STORE" 2>/dev/null | head -1)"
+		case "$_oldest" in
+		'' | *[!0-9]*) : ;;
+		*)
+			if [ "$_oldest" -lt "$_cutoff" ]; then
+				_tmp="${STORE}.tmp.$$"
+				if "${TS_BIN_DIR}/jq" -c --argjson c "$_cutoff" 'select((.t // 0) >= $c)' \
+					"$STORE" > "$_tmp" 2>/dev/null; then
+					mv -f "$_tmp" "$STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+					_lines="$(wc -l < "$STORE" 2>/dev/null || echo 0)"
+					case "$_lines" in '' | *[!0-9]*) _lines=0 ;; esac
+					_bytes="$(wc -c < "$STORE" 2>/dev/null || echo 0)"
+					case "$_bytes" in '' | *[!0-9]*) _bytes=0 ;; esac
+				else
+					rm -f "$_tmp" 2>/dev/null
+				fi
+			fi
+			;;
+		esac
+	fi
+
 	if [ "$_lines" -le "$MAX_ENTRIES" ] && [ "$_bytes" -le "$MAX_BYTES" ]; then
 		return 0
 	fi
 
-	_keep="$MAX_ENTRIES"
+	# The count prune.
+	#
+	# The store is append-only, so the last line is the newest and the
+	# first is the oldest: dropping from the front is first in, first out.
+	#
+	# A starred entry is never dropped. It was starred on purpose, and
+	# the person who starred it is the only one who can unstar it -- a
+	# limit that quietly removed it would be the limit overruling them.
 	_tmp="${STORE}.tmp.$$"
-	if tail -n "$_keep" "$STORE" > "$_tmp" 2>/dev/null; then
+	if "${TS_BIN_DIR}/jq" -c -s --argjson n "$MAX_ENTRIES" '
+			. as $all
+			| ($all | map(select((.p // 0) != 1)) | reverse | .[0:$n]) as $keep
+			| (if ($keep | length) == 0 then {} else ($keep | map({(.t | tostring): true}) | add) end) as $keepMap
+			| $all | map(select((.p // 0) == 1 or ($keepMap[(.t | tostring)] == true))) | .[]
+		' "$STORE" > "$_tmp" 2>/dev/null; then
 		mv -f "$_tmp" "$STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
 	else
 		rm -f "$_tmp" 2>/dev/null
@@ -150,6 +220,14 @@ mkdir -p "$TS_DIR" 2>/dev/null
 touch "$STORE" 2>/dev/null
 chmod 0600 "$STORE" 2>/dev/null
 
+# The defaults, written out so the file is there to be read and edited.
+[ -f "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" ] || {
+	printf 'watch=true\n' > "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
+	printf 'max=5000\n' >> "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
+	printf 'days=0\n' >> "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
+	chmod 0600 "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
+}
+
 # The helper has to be readable by the shell uid and not writable by it, and
 # it cannot live under /data/adb because that directory cannot be traversed
 # by anybody but root. Put the read-only copy in its place, and put it back
@@ -161,10 +239,17 @@ while true; do
 	# The helper runs as the shell uid. See the note at the top of this file:
 	# running it as root would wipe the user's clipboard.
 	ensure_clip_dex >/dev/null 2>&1
+
 	su 2000 -c "CLASSPATH='${DEX}' app_process /system/bin ${CLASS} listen com.android.shell" 2>/dev/null |
 	while IFS= read -r _line; do
 		case "$_line" in
 		changed:*)
+			# The settings are read for every copy rather than once at
+			# startup, so switching the recording off takes effect at
+			# once instead of whenever the watcher is restarted.
+			_watch="$(clip_conf watch true)"
+			# Recording can be switched off.
+			[ "$_watch" = "true" ] || continue
 			_rest="${_line#changed:}"
 			_b64="$(printf '%s' "$_rest" | cut -d'|' -f1)"
 			_src="$(printf '%s' "$_rest" | cut -d'|' -f2-)"

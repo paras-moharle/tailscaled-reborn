@@ -4,7 +4,7 @@ Tailscale on a rooted Android phone: the daemon built from upstream, kept up to
 date on its own, with a companion app for sending files and a desktop
 integration for the other direction.
 
-[![module](https://img.shields.io/badge/module-v1.0.28-4ea1ff)](module.prop)
+[![module](https://img.shields.io/badge/module-v1.0.29-4ea1ff)](module.prop)
 [![tailscale](https://img.shields.io/badge/tailscale-1.104.1-3ddc84)](https://tailscale.com)
 [![license](https://img.shields.io/badge/license-BSD--3--Clause-a78bfa)](LICENSE)
 
@@ -30,7 +30,7 @@ integration for the other direction.
 
 ## Install
 
-1. Download **`Tailscaled-Reborn-v1.0.28-full.zip`** from
+1. Download **`Tailscaled-Reborn-v1.0.29-full.zip`** from
    [the releases page](https://github.com/paras-moharle/tailscaled-reborn/releases).
 2. **Magisk / KernelSU → Modules → Install from storage.**
 3. Reboot.
@@ -254,6 +254,15 @@ reachable — `tailscale status` on the desktop will say which.
 
 **The app says root is missing.** TailBridge needs the same root manager as
 the module, and has to be granted it once.
+
+---
+
+## Known issues
+
+The things that are known to be wrong, and what is being done about them,
+are written down in [ISSUES.md](ISSUES.md). It is kept as a list rather
+than hidden, because a project that only says what works is not telling the
+truth.
 
 ---
 

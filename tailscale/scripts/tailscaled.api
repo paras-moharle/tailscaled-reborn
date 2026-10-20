@@ -683,6 +683,65 @@ clip_store_json() {
 	"$JQ" -s '.' "$CLIP_STORE" 2>/dev/null || echo "[]"
 }
 
+# Bring the store within its limits now.
+clip_prune() {
+	_max="$(clip_conf max 5000)"
+	case "$_max" in '' | *[!0-9]*) _max=5000 ;; esac
+	[ -f "$CLIP_STORE" ] || return 0
+	_lines="$(wc -l < "$CLIP_STORE" 2>/dev/null || echo 0)"
+	case "$_lines" in '' | *[!0-9]*) _lines=0 ;; esac
+	[ "$_lines" -gt "$_max" ] || return 0
+	# Starred entries are kept whatever the limit is.
+	_tmp="${CLIP_STORE}.tmp.$$"
+	if "$JQ" -c -s --argjson n "$_max" '
+			. as $all
+			| ($all | map(select((.p // 0) != 1)) | reverse | .[0:$n]) as $keep
+			| (if ($keep | length) == 0 then {} else ($keep | map({(.t | tostring): true}) | add) end) as $keepMap
+			| $all | map(select((.p // 0) == 1 or ($keepMap[(.t | tostring)] == true))) | .[]
+		' "$CLIP_STORE" > "$_tmp" 2>/dev/null; then
+		mv -f "$_tmp" "$CLIP_STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+	else
+		rm -f "$_tmp" 2>/dev/null
+	fi
+	return 0
+}
+
+# clip_mark <timestamp> <1 or 0>
+#
+# Star an entry, or unstar it. The timestamp is what identifies it: the
+# store is a list of lines with no other handle, and a copy of a thing
+# happens once.
+clip_mark() {
+	_t="${1:-}"
+	_p="${2:-1}"
+	[ -n "$_t" ] || err "clipboard: star needs a timestamp"
+	[ -f "$CLIP_STORE" ] || { printf '{"ok":true}\n'; return 0; }
+	_tmp="${CLIP_STORE}.tmp.$$"
+	if "$JQ" -c --argjson t "$_t" --argjson p "$_p" \
+		'if ((.t // 0) == $t) then .p = $p else . end' \
+		"$CLIP_STORE" > "$_tmp" 2>/dev/null; then
+		mv -f "$_tmp" "$CLIP_STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+	else
+		rm -f "$_tmp" 2>/dev/null
+	fi
+	printf '{"ok":true}\n'
+}
+
+# clip_delete <timestamp>
+clip_delete() {
+	_t="${1:-}"
+	[ -n "$_t" ] || err "clipboard: delete needs a timestamp"
+	[ -f "$CLIP_STORE" ] || { printf '{"ok":true}\n'; return 0; }
+	_tmp="${CLIP_STORE}.tmp.$$"
+	if "$JQ" -c --argjson t "$_t" 'select((.t // 0) != $t)' \
+		"$CLIP_STORE" > "$_tmp" 2>/dev/null; then
+		mv -f "$_tmp" "$CLIP_STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+	else
+		rm -f "$_tmp" 2>/dev/null
+	fi
+	printf '{"ok":true}\n'
+}
+
 api_clipboard() {
 	_cmd="${1:-list}"
 	shift 2>/dev/null || true
@@ -735,6 +794,71 @@ EOF
 	clear)
 		: > "$CLIP_STORE" 2>/dev/null || true
 		printf '{"ok":true}\n'
+		;;
+	config)
+		# What the watcher is doing, as opposed to what it has done.
+		printf '{"ok":true,"watch":%s,"max":%s,"days":%s}\n' \
+			"$("$JQ" -Rn --arg v "$(clip_conf watch true)" '$v')" \
+			"$("$JQ" -Rn --arg v "$(clip_conf max 5000)" '$v')" \
+			"$("$JQ" -Rn --arg v "$(clip_conf days 0)" '$v')"
+		;;
+	set)
+		_key="${1:-}"
+		_val="${2:-}"
+		[ -n "$_key" ] || err "clipboard: set needs a key"
+		case "$_key" in
+		watch)
+			case "$_val" in
+			true | false) ;;
+			*) err "clipboard: watch expects true or false, got '$_val'" ;;
+			esac
+			;;
+		max)
+			case "$_val" in
+			'' | *[!0-9]*) err "clipboard: max expects a number, got '$_val'" ;;
+			esac
+			[ "$_val" -ge 10 ] || err "clipboard: max must be at least 10"
+			[ "$_val" -le 50000 ] || err "clipboard: max must be at most 50000"
+			;;
+		days)
+			# How long to keep an entry. Zero means for ever.
+			case "$_val" in
+			'' | *[!0-9]*) err "clipboard: days expects a number, got '$_val'" ;;
+			esac
+			[ "$_val" -le 3650 ] || err "clipboard: days must be at most 3650"
+			;;
+		*) err "clipboard: unknown setting $_key" ;;
+		esac
+		clip_conf_set "$_key" "$_val"
+		# Keep the store within the new limits straight away, rather than
+		# waiting for the next copy to trigger a prune.
+		case "$_key" in
+		max | days) clip_prune ;;
+		esac
+		printf '{"ok":true}\n'
+		;;
+	star)
+		clip_mark "$1" 1
+		;;
+	unstar)
+		clip_mark "$1" 0
+		;;
+	delete)
+		clip_delete "$1"
+		;;
+	apps)
+		# Which apps have copied something, and how often.
+		#
+		# This is the list the settings show, so the user can tell a
+		# password manager to keep its copies to itself without having to
+		# know the package name.
+		"$JQ" -s '
+			[ .[] | select((.s // "") != "") ]
+			| group_by(.s)
+			| map({ source: .[0].s, count: length })
+			| sort_by(-.count)
+		' "$CLIP_STORE" 2>/dev/null || echo "[]"
+		echo
 		;;
 	*)
 		err "clipboard: unknown command $_cmd"

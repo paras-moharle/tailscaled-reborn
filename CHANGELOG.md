@@ -1,3 +1,52 @@
+## v1.0.29  2026-10-21
+
+- **The clipboard is instant.** A copy used to take up to ten seconds to
+  appear on the Clip screen. The module's broadcast was blocking the next
+  copy behind it, the app was not hearing the broadcast at all, and the
+  clipboard helper was reading the clipboard on the thread the system called
+  it back on, where it waited for the lock the system was holding. It is
+  about 400 ms now.
+- **The daemon updates itself again.** The updater ran once at boot, before
+  the network was up, and stamped the 24 hour clock before it tried
+  anything, so one failure meant a whole day of not checking. It waits for
+  the network now, the clock only starts when the check worked, and the
+  supervisor looks again every six hours.
+- **A new look throughout.** The navigation bar floats and marks the tab you
+  are on, the cards are a shade lighter than the page with a hairline edge,
+  and the type is a small set of sizes used consistently rather than a size
+  per screen. Still true AMOLED black.
+- **New navigation icons.** Drawn as one set: the same stroke weight, the
+  same optical size, and filled knobs on the settings sliders that read as
+  knobs instead of as dashes.
+- **Toggles instead of check marks.** Every control that is on or off is now
+  a switch. A check mark says "in a list"; a switch says "on or off".
+- **The header and the body no longer disagree.** The poll used to refresh
+  the header and leave the rest of the screen alone, so the header could say
+  "Connected" over a body saying "Not signed in" until the screen was pulled
+  to refresh. The body is now rebuilt when what it depends on changes.
+- **A stopped daemon says so.** A daemon that is not running has nobody
+  signed in and nobody signed out, and the screen used to send you to the
+  sign-in page for a problem signing in cannot fix. It now says the daemon
+  is stopped, and offers to start it.
+- **Star what matters.** An entry can be starred, and a starred entry is
+  never dropped by a limit — only you can remove it. The star at the top of
+  the list shows the starred entries on their own.
+- **Delete an entry.** A long press on an entry offers to copy it, send it,
+  or delete it.
+- **Two limits on the history, both yours to set.** How many entries to keep,
+  and how long to keep them. Both are numbers you type, not a list to pick
+  from, and the older entries go first.
+- **The app names the app that copied something.** A list of package names is
+  a list of nothing a person can read; the clipboard now shows the app's
+  name and its icon.
+- **The clipboard watcher is supervised.** It is part of the same supervision
+  as the daemon and the receiver, so a watcher that dies is started again
+  rather than leaving the history quietly empty.
+- **A release now updates the app.** Every build signed the app with a key
+  generated on the spot, so Android refused to replace the installed one. The
+  installer notices and replaces it, and the release build uses a stored key
+  when the repository has one.
+
 ## v1.0.28  2026-10-21
 
 - **A clipboard history**, in a new Clip tab. Everything copied is recorded

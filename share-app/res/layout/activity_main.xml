@@ -21,12 +21,29 @@
 		android:paddingTop="22dp"
 		android:paddingBottom="14dp">
 
-		<View
-			android:id="@+id/dot"
-			android:layout_width="9dp"
-			android:layout_height="9dp"
-			android:layout_marginEnd="11dp"
-			android:background="@drawable/dot" />
+		<!-- The status light.
+
+		     A bare dot on a black page is very small and very easy to miss.
+		     A disc of the same colour at a low alpha behind it reads as a
+		     light rather than a speck. -->
+		<FrameLayout
+			android:layout_width="24dp"
+			android:layout_height="24dp"
+			android:layout_marginEnd="12dp">
+
+			<View
+				android:id="@+id/dotHalo"
+				android:layout_width="24dp"
+				android:layout_height="24dp"
+				android:background="@drawable/dot_halo" />
+
+			<View
+				android:id="@+id/dot"
+				android:layout_width="9dp"
+				android:layout_height="9dp"
+				android:layout_gravity="center"
+				android:background="@drawable/dot" />
+		</FrameLayout>
 
 		<LinearLayout
 			android:layout_width="0dp"
@@ -36,24 +53,21 @@
 
 			<TextView
 				android:id="@+id/status"
+				style="@style/Text.Status"
 				android:layout_width="wrap_content"
 				android:layout_height="wrap_content"
 				android:singleLine="true"
 				android:ellipsize="end"
-				android:text="@string/loading"
-				android:textColor="@color/text"
-				android:textSize="19sp"
-				android:textStyle="bold" />
+				android:text="@string/loading" />
 
 			<TextView
 				android:id="@+id/version"
+				style="@style/Text.StatusSub"
 				android:layout_width="wrap_content"
 				android:layout_height="wrap_content"
-				android:layout_marginTop="2dp"
+				android:layout_marginTop="3dp"
 				android:singleLine="true"
-				android:ellipsize="end"
-				android:textColor="@color/text2"
-				android:textSize="12sp" />
+				android:ellipsize="end" />
 		</LinearLayout>
 
 		<!--Manual refresh. Peer presence in particular can change without
@@ -105,7 +119,7 @@
 				android:orientation="vertical"
 				android:paddingStart="16dp"
 				android:paddingEnd="16dp"
-				android:paddingBottom="28dp" />
+				android:paddingBottom="96dp" />
 		</ScrollView>
 
 
@@ -124,7 +138,7 @@
 				android:orientation="vertical"
 				android:paddingStart="16dp"
 				android:paddingEnd="16dp"
-				android:paddingBottom="28dp" />
+				android:paddingBottom="96dp" />
 		</ScrollView>
 
 		<ScrollView
@@ -142,7 +156,7 @@
 				android:orientation="vertical"
 				android:paddingStart="16dp"
 				android:paddingEnd="16dp"
-				android:paddingBottom="28dp" />
+				android:paddingBottom="96dp" />
 		</ScrollView>
 
 		<ScrollView
@@ -160,33 +174,87 @@
 				android:orientation="vertical"
 				android:paddingStart="16dp"
 				android:paddingEnd="16dp"
-				android:paddingBottom="28dp" />
+				android:paddingBottom="96dp" />
 		</ScrollView>
+
+		<!-- The two actions this screen has, floating over the list.
+
+		     The list is the point of the screen, so the buttons are moved
+		     out of the flow and into the corner. They are hidden on the
+		     other tabs. -->
+		<LinearLayout
+			android:id="@+id/clipActions"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:layout_gravity="bottom|end"
+			android:orientation="vertical"
+			android:gravity="end"
+			android:layout_marginEnd="18dp"
+			android:layout_marginBottom="18dp"
+			android:visibility="gone">
+
+			<ImageView
+				android:id="@+id/clipNowFab"
+				android:layout_width="50dp"
+				android:layout_height="50dp"
+				android:background="@drawable/fab_secondary"
+				android:padding="13dp"
+				android:src="@drawable/ic_clip"
+				android:contentDescription="@string/clip_now" />
+
+			<ImageView
+				android:id="@+id/clipSendFab"
+				android:layout_width="56dp"
+				android:layout_height="56dp"
+				android:layout_marginTop="12dp"
+				android:background="@drawable/fab"
+				android:padding="15dp"
+				android:src="@drawable/ic_send"
+				android:contentDescription="@string/clip_send_all" />
+		</LinearLayout>
 	</FrameLayout>
 
-	<!-- ── nav: flat bar, hairline above, icon over a small word ── -->
-	<View
-		android:layout_width="match_parent"
-		android:layout_height="1dp"
-		android:background="@drawable/divider" />
-
+	<!-- ── nav: a floating bar, with the selected tab marked ──
+	     A bar that runs edge to edge on a black page is just a band of
+	     slightly less black. Floating it with a margin and rounding its
+	     ends makes it read as a control sitting on the page, and the
+	     selected tab gets a mark behind its icon so the eye can find it
+	     without reading the labels. -->
 	<LinearLayout
 		android:id="@+id/navBar"
 		android:layout_width="match_parent"
 		android:layout_height="wrap_content"
 		android:orientation="horizontal"
-		android:background="@color/bg"
-		android:paddingTop="9dp"
-		android:paddingBottom="12dp">
+		android:background="@drawable/nav_bar"
+		android:paddingTop="8dp"
+		android:paddingBottom="8dp"
+		android:layout_marginStart="14dp"
+		android:layout_marginEnd="14dp"
+		android:layout_marginBottom="12dp">
 
 		<LinearLayout
 			android:id="@+id/navSend"
 			style="@style/Nav">
 
-			<ImageView
-				android:id="@+id/navIcon"
-				style="@style/NavIcon"
-				android:src="@drawable/ic_send" />
+			<FrameLayout
+				style="@style/NavPill"
+				android:background="@drawable/nav_pill_ripple"
+				android:clickable="false"
+				android:focusable="false">
+
+				<View
+					android:id="@+id/navPill"
+					android:layout_width="match_parent"
+					android:layout_height="match_parent"
+					android:background="@drawable/nav_pill"
+					android:visibility="invisible" />
+
+				<ImageView
+					android:id="@+id/navIcon"
+					style="@style/NavIcon"
+					android:layout_gravity="center"
+					android:src="@drawable/ic_send" />
+			</FrameLayout>
 
 			<TextView
 				android:id="@+id/navLabel"
@@ -199,10 +267,25 @@
 			android:id="@+id/navSettings"
 			style="@style/Nav">
 
-			<ImageView
-				android:id="@+id/navIcon"
-				style="@style/NavIcon"
-				android:src="@drawable/ic_settings" />
+			<FrameLayout
+				style="@style/NavPill"
+				android:background="@drawable/nav_pill_ripple"
+				android:clickable="false"
+				android:focusable="false">
+
+				<View
+					android:id="@+id/navPill"
+					android:layout_width="match_parent"
+					android:layout_height="match_parent"
+					android:background="@drawable/nav_pill"
+					android:visibility="invisible" />
+
+				<ImageView
+					android:id="@+id/navIcon"
+					style="@style/NavIcon"
+					android:layout_gravity="center"
+					android:src="@drawable/ic_settings" />
+			</FrameLayout>
 
 			<TextView
 				android:id="@+id/navLabel"
@@ -214,10 +297,25 @@
 			android:id="@+id/navSystem"
 			style="@style/Nav">
 
-			<ImageView
-				android:id="@+id/navIcon"
-				style="@style/NavIcon"
-				android:src="@drawable/ic_system" />
+			<FrameLayout
+				style="@style/NavPill"
+				android:background="@drawable/nav_pill_ripple"
+				android:clickable="false"
+				android:focusable="false">
+
+				<View
+					android:id="@+id/navPill"
+					android:layout_width="match_parent"
+					android:layout_height="match_parent"
+					android:background="@drawable/nav_pill"
+					android:visibility="invisible" />
+
+				<ImageView
+					android:id="@+id/navIcon"
+					style="@style/NavIcon"
+					android:layout_gravity="center"
+					android:src="@drawable/ic_system" />
+			</FrameLayout>
 
 			<TextView
 				android:id="@+id/navLabel"
@@ -229,10 +327,25 @@
 			android:id="@+id/navClip"
 			style="@style/Nav">
 
-			<ImageView
-				android:id="@+id/navIcon"
-				style="@style/NavIcon"
-				android:src="@drawable/ic_clip" />
+			<FrameLayout
+				style="@style/NavPill"
+				android:background="@drawable/nav_pill_ripple"
+				android:clickable="false"
+				android:focusable="false">
+
+				<View
+					android:id="@+id/navPill"
+					android:layout_width="match_parent"
+					android:layout_height="match_parent"
+					android:background="@drawable/nav_pill"
+					android:visibility="invisible" />
+
+				<ImageView
+					android:id="@+id/navIcon"
+					style="@style/NavIcon"
+					android:layout_gravity="center"
+					android:src="@drawable/ic_clip" />
+			</FrameLayout>
 
 			<TextView
 				android:id="@+id/navLabel"

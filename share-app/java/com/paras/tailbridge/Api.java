@@ -244,6 +244,36 @@ final class Api {
 		call("clipboard", "clear");
 	}
 
+	/** Star an entry, so a limit never quietly removes it. */
+	static void clipboardStar(long timestamp, boolean star) throws Exception {
+		call(60_000, "clipboard", star ? "star" : "unstar", String.valueOf(timestamp));
+	}
+
+	/** Remove one entry. */
+	static void clipboardDelete(long timestamp) throws Exception {
+		call(60_000, "clipboard", "delete", String.valueOf(timestamp));
+	}
+
+	/** What the watcher is doing: watch, max, ignore. */
+	static JSONObject clipboardConfig() throws Exception {
+		return call("clipboard", "config");
+	}
+
+	/** Change one of the watcher's settings. */
+	static void clipboardSet(String key, String value) throws Exception {
+		call(60_000, "clipboard", "set", key, value);
+	}
+
+	/** Which apps have copied something, and how often. */
+	static JSONArray clipboardApps() throws Exception {
+		String out = callRaw(DEFAULT_TIMEOUT_MS, "clipboard", "apps");
+		int i = out.indexOf('[');
+		if (i < 0) {
+			return new JSONArray();
+		}
+		return new JSONArray(out.substring(i).trim());
+	}
+
 	/** Apply a preference. Returns the refreshed status document. */
 	static JSONObject set(String key, String value) throws Exception {
 		return call("set", key, value);

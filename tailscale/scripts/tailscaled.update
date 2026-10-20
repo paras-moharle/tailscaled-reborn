@@ -123,6 +123,14 @@ up_to_date() {
 
 touch_stamp() { date +%s >"$STAMP_FILE" 2>/dev/null || true; }
 
+# The feed is what says whether there is a newer build. If it cannot be
+# reached, that is not the same as "there is an update": it is "nobody
+# knows", and the answer to that is to try again later, not to stamp the
+# clock and wait a day.
+feed_reachable() {
+	[ -n "$(latest_version 2>/dev/null || true)" ]
+}
+
 # due — true when the interval has elapsed (or we have never checked).
 due() {
 	[ "${TS_UPDATE_AUTO}" = true ] || return 0
@@ -245,10 +253,40 @@ ensure_daemon_running() {
 }
 
 cmd_run() {
-	touch_stamp
 	_cur="$(current_version)"
 
+	# Wait for the feed rather than giving up on it.
+	#
+	# This runs at boot, and at boot the phone has usually not finished
+	# coming up on the network. The feed fetch then fails, the run reports
+	# "Could not obtain the new binary", and -- because the clock was
+	# stamped before any of that -- the next attempt was a day away. The
+	# next boot failed the same way, and the daemon never updated at all.
+	#
+	# The run is in the background, so waiting costs nothing.
+	_attempt=0
+	while [ "$_attempt" -lt "${TS_UPDATE_ATTEMPTS:-8}" ]; do
+		feed_reachable && break
+		_attempt=$((_attempt + 1))
+		[ "$_attempt" -ge "${TS_UPDATE_ATTEMPTS:-8}" ] && break
+		log Info "The release feed is not reachable yet; waiting."
+		sleep "${TS_UPDATE_RETRY_WAIT:-20}"
+	done
+
+	if ! feed_reachable; then
+		# Nobody knows whether there is an update. Say so, and do not
+		# stamp: this is tried again rather than being skipped for a day.
+		log Error "Could not reach the release feed; will try again later."
+		write_state "feed-unreachable"
+		ensure_daemon_running || true
+		return 1
+	fi
+
+	# The clock starts now, with the feed in hand. A run that fails later
+	# does not consume the interval, so a broken download is retried
+	# instead of being waited out.
 	if up_to_date; then
+		touch_stamp
 		write_state "ok-${_cur}"
 		return 0
 	fi
@@ -306,6 +344,7 @@ cmd_run() {
 	fi
 
 	log Success "tailscaled updated: ${_cur} -> ${_new}"
+	touch_stamp
 	write_state "ok-${_new}"
 	# Keep the snapshot: it is now the previous version, which is exactly what
 	# `tailscaled.update rollback` should restore.

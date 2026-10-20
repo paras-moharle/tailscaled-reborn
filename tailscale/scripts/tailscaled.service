@@ -171,6 +171,17 @@ _tailscaled(){
     echo "$1" > "${TS_RUN_DIR}/daemon.wanted" 2>/dev/null || true
   }
 
+  # Tell the app, if it is open.
+  #
+  # The app used to find out about a daemon starting or stopping by
+  # polling, which meant the screen could say "stopped" over a running
+  # daemon for as long as the poll took to notice. Being told is instant
+  # and costs nothing when the app is not running.
+  announce_state() {
+    am broadcast -a com.paras.tailbridge.action.STATE_CHANGED \
+      -p com.paras.tailbridge >/dev/null 2>&1 || true
+  }
+
   case "$1" in
     status)
       program is_running
@@ -181,6 +192,7 @@ _tailscaled(){
         log Warning "Got unfriendly response after start tailscaled !"
         return 1
       fi
+      announce_state
       return 0
     ;;
     restart)
@@ -198,6 +210,7 @@ _tailscaled(){
         log Error "Got unfriendly response after stop tailscaled !"
         return 1
       fi
+      announce_state
     ;;
   esac
 }

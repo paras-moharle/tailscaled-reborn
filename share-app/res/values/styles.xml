@@ -15,21 +15,92 @@
 		<item name="android:windowBackground">@drawable/dialog_bg</item>
 		<item name="android:colorAccent">@color/accent</item>
 		<item name="android:colorControlActivated">@color/accent</item>
-		<item name="android:backgroundDimAmount">0.66</item>
+		<item name="android:backgroundDimAmount">0.72</item>
 		<item name="android:textColorPrimary">@color/text</item>
 		<item name="android:textColorSecondary">@color/text2</item>
 	</style>
 
+	<!-- ── type scale ──────────────────────────────────────────
+
+	     The styles are named Text.Something, so they all inherit from this
+	     one. It carries the two things every piece of text in the app
+	     shares: the colour, and no extra padding above and below the
+	     glyphs, which is what makes a screen look set rather than
+	     typeset.
+	     Three sizes do almost all the work: a row's title, a row's
+	     explanation, and the small label that names a group of rows.
+	     Keeping the set that small is what makes a screen look designed
+	     rather than assembled. -->
+
+	<style name="Text">
+		<item name="android:textColor">@color/text</item>
+		<item name="android:includeFontPadding">false</item>
+	</style>
+
+
+	<!-- The state of the daemon, at the top of every screen. -->
+	<style name="Text.Status">
+		<item name="android:textSize">25sp</item>
+		<item name="android:textColor">@color/text</item>
+		<item name="android:letterSpacing">-0.015</item>
+		<item name="android:textStyle">bold</item>
+	</style>
+
+	<!-- The line under the status: the host and the version. -->
+	<style name="Text.StatusSub">
+		<item name="android:textSize">13sp</item>
+		<item name="android:textColor">@color/text2</item>
+	</style>
+
+	<!-- A row's title. -->
+	<style name="Text.RowTitle">
+		<item name="android:textSize">15sp</item>
+		<item name="android:textColor">@color/text</item>
+	</style>
+
+	<!-- A row's explanation. -->
+	<style name="Text.RowSub">
+		<item name="android:textSize">12.5sp</item>
+		<item name="android:textColor">@color/text2</item>
+	</style>
+
+	<!-- The name of a group of rows. Small, wide, and quiet, so it labels
+	     without competing with what it labels. -->
+	<style name="Text.Section">
+		<item name="android:textSize">11sp</item>
+		<item name="android:textColor">@color/hint</item>
+		<item name="android:textStyle">bold</item>
+		<item name="android:textAllCaps">true</item>
+		<item name="android:letterSpacing">0.1</item>
+	</style>
+
+	<!-- The text of a note under a group. -->
+	<style name="Text.Note">
+		<item name="android:textSize">12.5sp</item>
+		<item name="android:textColor">@color/hint</item>
+	</style>
+
 	<!-- ── bottom nav ───────────────────────────────────────────── -->
+	<!-- The item itself has no background.
+
+	     The default selectableItemBackground is a rectangle the size of the
+	     whole item, so pressing one put a square shadow across the bar. The
+	     touch feedback belongs on the mark behind the icon, which is the
+	     shape of the thing being pressed. -->
 	<style name="Nav">
 		<item name="android:layout_width">0dp</item>
 		<item name="android:layout_weight">1</item>
 		<item name="android:layout_height">wrap_content</item>
 		<item name="android:orientation">vertical</item>
 		<item name="android:gravity">center</item>
-		<item name="android:background">?android:attr/selectableItemBackground</item>
 		<item name="android:clickable">true</item>
 		<item name="android:focusable">true</item>
+	</style>
+
+	<!-- The mark behind the selected tab's icon. -->
+	<style name="NavPill">
+		<item name="android:layout_width">56dp</item>
+		<item name="android:layout_height">30dp</item>
 	</style>
 
 	<style name="NavIcon">
@@ -41,11 +112,9 @@
 		<item name="android:layout_width">wrap_content</item>
 		<item name="android:layout_height">wrap_content</item>
 		<item name="android:layout_marginTop">5dp</item>
-		<item name="android:textSize">10sp</item>
+		<item name="android:textSize">10.5sp</item>
 		<item name="android:textColor">@color/hint</item>
 		<item name="android:singleLine">true</item>
 	</style>
-
-	<!-- ── text ─────────────────────────────────────────────────── -->
 
 </resources>

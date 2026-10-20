@@ -1,14 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Send: an arrow lifting out of a line.
+
+     The arrow and the line are separate, with a gap between them, so the
+     shape reads as "going somewhere" rather than as a box with a stick in
+     it. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
 	android:width="24dp" android:height="24dp"
 	android:viewportWidth="24" android:viewportHeight="24">
-	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="2"
 		android:strokeLineCap="round" android:strokeLineJoin="round"
-		android:fillColor="#00000000" android:pathData="M12,13.5 L12,3.5" />
-	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+		android:fillColor="#00000000"
+		android:pathData="M12,16.4 L12,4.9" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="2"
 		android:strokeLineCap="round" android:strokeLineJoin="round"
-		android:fillColor="#00000000" android:pathData="M8.2,7.3 L12,3.5 L15.8,7.3" />
-	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+		android:fillColor="#00000000"
+		android:pathData="M6.9,10 L12,4.9 L17.1,10" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="2"
 		android:strokeLineCap="round" android:strokeLineJoin="round"
-		android:fillColor="#00000000" android:pathData="M4.5,13.5 L4.5,20.5 L19.5,20.5 L19.5,13.5" />
+		android:fillColor="#00000000"
+		android:pathData="M4.6,19.5 L19.4,19.5" />
 </vector>

@@ -119,7 +119,22 @@ public class ClipBoard {
 		IOnPrimaryClipChangedListener.Stub listener = new IOnPrimaryClipChangedListener.Stub() {
 			@Override
 			public void dispatchPrimaryClipChanged() {
-				report(svc);
+				// Read the clipboard on another thread.
+				//
+				// The callback arrives on a binder thread, and the
+				// clipboard service holds its lock while it dispatches
+				// the notification. Reading from the callback thread
+				// asks for the same lock, so the read waits until the
+				// service has finished telling everybody -- which
+				// measured at two and a half seconds here.
+				//
+				// Moving the read off the callback thread lets the
+				// service finish its notification at once, and the read
+				// then finds the new clip straight away.
+				final Object service = svc;
+				Thread t = new Thread(() -> report(service));
+				t.setDaemon(true);
+				t.start();
 			}
 		};
 

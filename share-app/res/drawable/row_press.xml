@@ -1,15 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The press state of a row inside a card.
+
+     The corners follow the card, so a pressed row lights up the card's own
+     shape rather than a rectangle inside a rounded one. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
 	<item android:state_pressed="true">
 		<shape android:shape="rectangle">
 			<solid android:color="@color/surfaceHi" />
-			<corners android:radius="16dp" />
+			<corners android:radius="22dp" />
 		</shape>
 	</item>
 	<item>
 		<shape android:shape="rectangle">
 			<solid android:color="@android:color/transparent" />
-			<corners android:radius="16dp" />
+			<corners android:radius="22dp" />
 		</shape>
 	</item>
 </selector>

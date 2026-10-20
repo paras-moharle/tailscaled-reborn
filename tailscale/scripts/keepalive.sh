@@ -57,8 +57,29 @@ log_keepalive() {
 	echo "${CURRENT_TIME} [${1}]: ${2}" >>"${TS_RUN_LOG_FILE}" 2>/dev/null
 }
 
+# The update check, every few hours.
+#
+# The boot script runs it once, and at boot the network is usually not up
+# yet. The updater waits for the feed now, but a phone that stays offline
+# for longer than that would still miss the check until its next boot.
+# This is the second chance.
+# How many of the supervisor's cycles make an hour, and how many hours
+# between update checks.
+_UPDATE_CHECK_HOURS="${TS_UPDATE_CHECK_EVERY_HOURS:-6}"
+_CYCLES_PER_HOUR=$(( 3600 / INTERVAL ))
+[ "$_CYCLES_PER_HOUR" -ge 1 ] || _CYCLES_PER_HOUR=1
+_UPDATE_EVERY=$(( _CYCLES_PER_HOUR * _UPDATE_CHECK_HOURS ))
+_since_update=0
+
 while true; do
 	sleep "$INTERVAL"
+
+	_since_update=$((_since_update + 1))
+	if [ "$_since_update" -ge "$_UPDATE_EVERY" ]; then
+		_since_update=0
+		log_keepalive "Info" "Checking for a newer daemon."
+		"${TS_SCRIPTS_DIR}/tailscaled.update" run >>"${TS_RUN_LOG_FILE}" 2>&1 || true
+	fi
 
 	# The module's own off switch.
 	if [ -f "${TS_MOD_DIR}/disable" ]; then
@@ -86,12 +107,36 @@ while true; do
 		if daemon_running; then
 			ts_module_status running
 			log_keepalive "Info" "tailscaled is running again."
+			# Tell the app, if it is open: the daemon came back without
+			# anybody asking it to, and the screen should say so.
+			am broadcast -a com.paras.tailbridge.action.STATE_CHANGED \
+				-p com.paras.tailbridge >/dev/null 2>&1 || true
 		else
 			ts_module_status stopped
 			log_keepalive "Error" "tailscaled did not come back up."
 		fi
 	else
 		ts_module_status running
+	fi
+
+	# The clipboard watcher.
+	#
+	# It is the thing that records what is copied, and it has to be running
+	# for the history to be anything. The daemon and the receiver are not
+	# enough: a phone whose daemon is switched off still records copies, and
+	# a phone whose watcher has died records nothing at all, quietly.
+	if ! busybox pgrep -f 'tailscale/scripts/clipwatch.sh' >/dev/null 2>&1; then
+		log_keepalive "Warning" "The clipboard watcher is not running; starting it again."
+		for _p in $(pgrep -f 'tailscale/scripts/clipwatch.sh' 2>/dev/null); do
+			kill -9 "$_p" 2>/dev/null
+		done
+		nohup "${TS_SCRIPTS_DIR}/clipwatch.sh" >>"/dev/null" 2>&1 &
+		sleep 2
+		if busybox pgrep -f 'tailscale/scripts/clipwatch.sh' >/dev/null 2>&1; then
+			log_keepalive "Info" "The clipboard watcher is running again."
+		else
+			log_keepalive "Error" "The clipboard watcher did not come back up."
+		fi
 	fi
 
 	if ! receiver_running; then

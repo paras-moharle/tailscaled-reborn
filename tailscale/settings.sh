@@ -116,10 +116,45 @@ export TS_TAILDROP_DIR="${TS_TAILDROP_DIR:-/sdcard/Download/Tailscale}"
 # So the canonical copy lives with the rest of the module, and a read-only
 # copy is placed where the shell uid can read it. ensure_clip_dex() puts it
 # back if it goes missing.
+# The clipboard's own settings: what to record, how much to keep, and which
+# apps to leave alone. A plain key=value file next to the store, because the
+# watcher is a separate process from the app and both have to agree on it.
+TS_CLIP_CONF="${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}"
 TS_CLIP_DEX="${TS_DIR}/clip/clip.dex"
 TS_CLIP_DEX_RUN="${TS_CLIP_DEX_RUN:-/data/local/tmp/tailbridge-clip.dex}"
 TS_CLIP_CLASS="com.paras.tailbridge.clip.ClipBoard"
 TS_CLIP_STORE="${TS_CLIP_STORE:-${TS_DIR}/clipboard.jsonl}"
+
+# clip_conf <key> [default]
+#
+# One setting from the clipboard's configuration file.
+clip_conf() {
+	_k="$1"
+	_d="${2:-}"
+	[ -f "$TS_CLIP_CONF" ] || { printf '%s' "$_d"; return 0; }
+	_v="$(grep -m1 "^${_k}=" "$TS_CLIP_CONF" 2>/dev/null | cut -d= -f2-)"
+	[ -n "$_v" ] || _v="$_d"
+	printf '%s' "$_v"
+}
+
+# clip_conf_set <key> <value>
+#
+# The file is rewritten rather than edited in place, so a reader never sees a
+# half-written line.
+clip_conf_set() {
+	_k="$1"
+	_v="$2"
+	mkdir -p "$TS_DIR" 2>/dev/null
+	_tmp="${TS_CLIP_CONF}.tmp.$$"
+	: > "$_tmp" 2>/dev/null
+	if [ -f "$TS_CLIP_CONF" ]; then
+		grep -v "^${_k}=" "$TS_CLIP_CONF" 2>/dev/null >> "$_tmp" 2>/dev/null
+	fi
+	printf '%s=%s\n' "$_k" "$_v" >> "$_tmp" 2>/dev/null
+	chmod 0600 "$_tmp" 2>/dev/null
+	mv -f "$_tmp" "$TS_CLIP_CONF" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+	return 0
+}
 
 ensure_clip_dex() {
 	[ -f "$TS_CLIP_DEX" ] || return 1

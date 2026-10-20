@@ -24,6 +24,19 @@
   permission lives.
 -->
 <queries>
+	<!-- Every app that can be launched.
+
+	     The clipboard records which app each copy came from, and an app
+	     that is not visible cannot be looked up: no name, no icon. A
+	     launcher query makes every launchable app visible, which is
+	     exactly the set an app that copies something belongs to, and it
+	     is the narrow way to ask for it. Asking for every package on the
+	     device would be broader than the feature needs. -->
+	<intent>
+		<action android:name="android.intent.action.MAIN" />
+		<category android:name="android.intent.category.LAUNCHER" />
+	</intent>
+
 	<package android:name="com.resukisu.resukisu" />
 	<package android:name="me.weishu.kernelsu" />
 	<package android:name="com.topjohnwu.magisk" />
