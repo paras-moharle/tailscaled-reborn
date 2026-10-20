@@ -4,7 +4,7 @@ Tailscale on a rooted Android phone: the daemon built from upstream, kept up to
 date on its own, with a companion app for sending files and a desktop
 integration for the other direction.
 
-[![module](https://img.shields.io/badge/module-v1.0.26-4ea1ff)](module.prop)
+[![module](https://img.shields.io/badge/module-v1.0.27-4ea1ff)](module.prop)
 [![tailscale](https://img.shields.io/badge/tailscale-1.104.1-3ddc84)](https://tailscale.com)
 [![license](https://img.shields.io/badge/license-BSD--3--Clause-a78bfa)](LICENSE)
 
@@ -28,7 +28,7 @@ integration for the other direction.
 
 ## Install
 
-1. Download **`Tailscaled-Reborn-v1.0.26-full.zip`** from
+1. Download **`Tailscaled-Reborn-v1.0.27-full.zip`** from
    [the releases page](https://github.com/paras-moharle/tailscaled-reborn/releases).
 2. **Magisk / KernelSU → Modules → Install from storage.**
 3. Reboot.

@@ -1,3 +1,35 @@
+## v1.0.27  2026-10-20
+
+Fixes a regression introduced in v1.0.26, which broke the boot.
+
+- **The daemon, the receiver and the supervisor now start at boot.** v1.0.26
+  recorded the module's directory during installation, when the manager
+  unpacks a module into `modules_update/` and only moves it to `modules/`
+  afterwards. Every later read of `module.prop` therefore pointed at a
+  directory that no longer existed, and because those reads happen under
+  `set -e`, the failing read took the boot script down with it -- on its
+  very first line, before it had started anything. The phone came up with a
+  daemon that had not been started, and nothing in any log to say so.
+- **A send no longer looks like it failed.** With the receiver dead, the
+  daemon held the delivery and it arrived 25-40 seconds later, if at all --
+  long enough for the send to look broken. It now arrives in about four
+  seconds.
+- **The root manager no longer says "running" when it is not.** The module
+  description was compared against a state file of our own rather than
+  against what the description actually said, so a stale description stayed
+  stale forever. It is now read back from the file and corrected.
+- **The boot script survives any single failure.** Each step is independent:
+  a daemon that refuses to start no longer stops the receiver and the
+  supervisor from starting.
+- **Rotating the daemon's log is no longer fatal.** On a fresh boot the log
+  file does not exist, and the test that checked for it aborted the script
+  that starts the daemon.
+- **The receiver can no longer kill an unrelated process.** Its pid file
+  outlived the process, and the kernel is free to hand that process number
+  to something else; stopping the receiver could then signal a stranger. The
+  process is now checked before it is signalled, and the pid file is removed
+  on exit.
+
 ## v1.0.26  2026-10-19
 
 - **The daemon no longer disappears at boot.** The module used to move its

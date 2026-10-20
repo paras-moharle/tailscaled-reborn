@@ -17,15 +17,37 @@ TS_SCRIPTS_DIR="${TS_SCRIPTS_DIR:-${TS_DIR}/scripts}"
 # Set Magisk Tailscale module variables
 # The module directory is named after `id` in module.prop, so it cannot be
 # hardcoded: the id has changed over the life of this project, and a build
-# installed under a different id then could not find its own module.prop --
-# so the version read as empty and the disable file was never seen.
+# installed under a different id then could not find its own module.prop.
 #
-# customize.sh writes the real path here at install time. The fallback is the
-# current id, for an installation that somehow predates that.
+# The installer writes the path down, but it has to write the path the module
+# will LIVE at, not the one it is unpacked into: the manager unpacks a module
+# into modules_update/ and only moves it to modules/ once the install is
+# finished. Recording the temporary path meant that every later read of
+# module.prop looked at a directory that no longer existed -- and because
+# those reads happen under `set -e`, a failing read took the whole boot
+# script down with it. The daemon, the receiver and the supervisor all
+# failed to start, silently, on a phone that had been working the day before.
+#
+# So: trust the recorded path only if module.prop is actually there, and
+# otherwise go looking for the module.
+TS_MOD_DIR=""
 if [ -f "${TS_DIR}/module-dir" ]; then
 	TS_MOD_DIR="$(cat "${TS_DIR}/module-dir" 2>/dev/null)"
 fi
-[ -n "${TS_MOD_DIR:-}" ] || TS_MOD_DIR="/data/adb/modules/paras-tailscaled"
+if [ -n "$TS_MOD_DIR" ] && [ ! -f "${TS_MOD_DIR}/module.prop" ]; then
+	TS_MOD_DIR=""
+fi
+if [ -z "$TS_MOD_DIR" ]; then
+	# Find it by the one thing every copy of this module has: the update
+	# feed in its module.prop.
+	for _prop in /data/adb/modules/*/module.prop; do
+		[ -f "$_prop" ] || continue
+		grep -q 'tailscaled-reborn' "$_prop" 2>/dev/null || continue
+		TS_MOD_DIR="${_prop%/module.prop}"
+		break
+	done
+fi
+[ -n "$TS_MOD_DIR" ] || TS_MOD_DIR="/data/adb/modules/paras-tailscaled"
 export TS_MOD_DIR
 export TS_MOD_PROP="${TS_MOD_DIR}/module.prop"
 
@@ -109,7 +131,22 @@ ts_module_desc() {
 # module still works, it just does not advertise itself in the manager.
 ts_module_status() {
 	_want="$1"
-	_have="$(cat "$TS_MODULE_STATE_FILE" 2>/dev/null || true)"
+
+	# What the file actually says right now.
+	#
+	# Not what we last wrote: after a reboot the file and our memory of it
+	# can both be stale -- the description says "running" from yesterday, and
+	# the state file says "running" too, so comparing the two would agree
+	# with a lie. The file is the only thing the root manager ever reads, so
+	# the file is what has to be compared.
+	_have="unknown"
+	if [ -f "$TS_MOD_PROP" ]; then
+		_line="$(sed -n 's/^description=\[\([^]]*\)\].*/\1/p' "$TS_MOD_PROP" 2>/dev/null | head -1)"
+		case "$_line" in
+		*'tailscaled service is running'*) _have=running ;;
+		*'tailscaled is not running'*) _have=stopped ;;
+		esac
+	fi
 	[ "$_have" = "$_want" ] && return 0
 
 	mkdir -p "$TS_RUN_DIR" 2>/dev/null

@@ -62,7 +62,10 @@ program(){
     log Info "Starting ${program_name} service."
     if is_running; then return 0; fi 
     if ! command -v "$program_name" > /dev/null 2>&1; then log Error "program not found: ${program_name}"; return 1; fi
-    [ -f "${log_file}" ] && mv "${log_file}" "${log_file}.bak" # log for old output
+    # Not `test && mv`: on a fresh boot the log file does not exist yet, the
+    # test fails, and under `set -e` that aborted this script -- so the
+    # daemon was never started, with nothing to say why.
+    if [ -f "${log_file}" ]; then mv "${log_file}" "${log_file}.bak"; fi
     if [ ! -z "${pre_up}" ];then $pre_up  2>&1; fi
     # shellcheck disable=SC2086
     nohup $command > "${logdir}/${program_name}.log" 2>&1 &

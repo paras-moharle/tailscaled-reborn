@@ -283,10 +283,26 @@ report_ok() {
 
 # ---------------------------------------------------------------- singleton --
 stop() {
-	if [ -f "$PIDFILE" ]; then
-		kill "$(cat "$PIDFILE")" 2>/dev/null || true
-		rm -f "$PIDFILE" || true
+	[ -f "$PIDFILE" ] || return 0
+	_pid="$(cat "$PIDFILE" 2>/dev/null)"
+	rm -f "$PIDFILE" || true
+	[ -n "$_pid" ] || return 0
+
+	# Only ever kill the receiver.
+	#
+	# The pid file outlives the process: if the receiver is killed, the file
+	# stays, and the kernel is free to hand that process number to something
+	# else entirely. A later `stop` would then kill that unrelated process --
+	# which on a phone is how you take out an app the user never asked you
+	# to touch. So the process is checked before it is signalled.
+	if [ ! -r "/proc/${_pid}/cmdline" ]; then
+		return 0
 	fi
+	case "$(tr '\0' ' ' < "/proc/${_pid}/cmdline" 2>/dev/null)" in
+	*tailscaled.receive*) kill "$_pid" 2>/dev/null || true ;;
+	*) : # not ours; leave it alone ;;
+	esac
+	return 0
 }
 
 case "${1:-run}" in
@@ -295,7 +311,7 @@ stop)
 	exit 0
 	;;
 status)
-	if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+	if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; then
 		echo "receiving: yes (pid $(cat "$PIDFILE"))"
 	else
 		echo "receiving: no"
@@ -307,6 +323,16 @@ esac
 stop
 mkdir -p "$TS_RUN_DIR"
 echo $$ > "$PIDFILE"
+
+# Take the pid file with us. A stale one is how a later stop ends up
+# signalling a process number the kernel has since handed to somebody else.
+cleanup_pidfile() {
+	[ -f "$PIDFILE" ] || return 0
+	[ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ] || return 0
+	rm -f "$PIDFILE" 2>/dev/null || true
+}
+trap cleanup_pidfile EXIT INT TERM
+
 log_line "receiver started (pid $$, destination ${DEST})"
 
 # Drain whatever piled up while we were not running, before blocking.

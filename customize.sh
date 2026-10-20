@@ -229,7 +229,17 @@ fi
 # cannot know it in advance. Write it down for them: hardcoding it meant that
 # a build installed under a different id could not find its own module.prop,
 # and the version read as empty.
-echo "$MODPATH" > "$TS_DIR/module-dir" 2>/dev/null || true
+# The path the module will LIVE at, not $MODPATH.
+#
+# The manager unpacks a module into modules_update/<id> and moves it to
+# modules/<id> only after the install has finished, so $MODPATH is a
+# temporary path. Writing that down left every later read of module.prop
+# pointing at a directory that no longer existed, and under `set -e` that
+# took the boot script down with it -- so the daemon, the receiver and the
+# supervisor silently failed to start.
+_ts_id="$(sed -n 's/^id=//p' "$MODPATH/module.prop" 2>/dev/null | head -1)"
+[ -n "$_ts_id" ] || _ts_id="paras-tailscaled"
+echo "/data/adb/modules/${_ts_id}" > "$TS_DIR/module-dir" 2>/dev/null || true
 
 ui_print "- Installing the TailBridge app..."
 # The companion app is the only interface this fork ships: it provides Taildrop
