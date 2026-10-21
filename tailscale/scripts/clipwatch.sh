@@ -133,6 +133,9 @@ append_entry() {
 		if sed '$d' "$STORE" > "$_tmp" 2>/dev/null; then
 			printf '%s\n' "$_json" >> "$_tmp" 2>/dev/null
 			mv -f "$_tmp" "$STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+		# A file written by the shell gets whatever the umask says, and
+		# the store is meant to be readable by root alone.
+		chmod 0600 "$STORE" 2>/dev/null
 		else
 			rm -f "$_tmp" 2>/dev/null
 			printf '%s\n' "$_json" >> "$STORE" 2>/dev/null

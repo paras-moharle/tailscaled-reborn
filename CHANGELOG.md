@@ -17,6 +17,14 @@
 - **A download is retried** rather than failing the install, and the feed
   is fetched once instead of three times, so a single hiccup on a small
   file cannot stop an install.
+- **The app can turn on wireless debugging.** adb over TCP, on the phone's
+  Tailscale address: the address that does not move when the phone's
+  address on the local network changes with its lease. The app sets the
+  port, restarts adbd, and shows the address to use. It needs nothing from
+  the module — it is a property and a restart, and the app already has
+  root. **It is a risk and it says so**: anything that can reach the phone
+  on the tailnet, and that has your adb key, has the phone. Turning it on
+  is asked about first.
 - **A file sent to the phone arrived twice.** On a current daemon the same
   delivery is in two places at once: the daemon puts it in the delivery
   folder, and `tailscale file get` copies it into the inbox as well. The

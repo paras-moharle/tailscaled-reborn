@@ -211,4 +211,13 @@
 	<string name="received_files_row">Received files (%d)</string>
 	<string name="received_files_row_none">Received files</string>
 	<string name="taildrop_folder_sub">Downloads/Tailscale, automatically</string>
+  	<string name="wireless_adb_group">Wireless debugging</string>
+  	<string name="wireless_adb_switch">adb over the network</string>
+  	<string name="wireless_adb_sub">Reach the phone with adb on its Tailscale address</string>
+  	<string name="wireless_adb_address">Address</string>
+  	<string name="wireless_adb_warning">This is a risk, and it is marked as one. Anything that can reach this phone on the tailnet, and that has your adb key, has the phone: it can read everything on it and change anything on it. The port stays open until you turn this off. Turn it off when you do not need it.</string>
+  	<string name="wireless_adb_confirm">This opens port 5555 on the phone\'s tailnet, so that adb can reach it without a cable.\n\nAnything on your tailnet with your adb key can then control the phone completely. The port stays open until you turn this off.\n\nTurn it on?</string>
+  	<string name="wireless_adb_turn_on">Turn on</string>
+  	<string name="wireless_adb_on_toast">Wireless debugging is on</string>
+  	<string name="wireless_adb_off_toast">Wireless debugging is off</string>
 </resources>

@@ -283,6 +283,33 @@ there is a copy and paste away.
 
 ---
 
+## Wireless debugging
+
+The app can turn on **adb over TCP**, so the phone can be reached without a
+cable:
+
+```
+adb connect <the phone's Tailscale address>:5555
+```
+
+The address is on the **System** tab, under *Wireless debugging*. The
+address it uses is the Tailscale one, because that is the one that does
+not move: the phone's address on the local network changes with its lease,
+and a phone whose address moves is a phone you cannot reach.
+
+**This is a risk, and the app says so before it does it.** Anything that
+can reach the phone on the tailnet, and that has your adb key, has the
+phone: it can read everything on it and change anything on it. The port
+stays open until it is turned off.
+
+The setting survives a reboot, because it is stored as a system property
+(`persist.adb.tcp.port`) and not just switched on. Turning it off in the
+app closes it again.
+
+The phone needs *USB debugging* switched on in the developer options for
+any of this to work; that is Android's own setting, and the app does not
+touch it.
+
 ## Nautilus extension
 
 ```sh

@@ -194,6 +194,8 @@ public class MainActivity extends Activity {
 	 */
 	private static final long POLL_MS = 15000;
 	private volatile String latestVersion = "";
+	/** Whether adbd is listening for TCP connections. */
+	private volatile boolean adbWireless;
 
 	private final List<Uri> pendingUris = new ArrayList<>();
 	/** Started from a share sheet rather than the launcher. */
@@ -1040,6 +1042,14 @@ public class MainActivity extends Activity {
 				err = getString(R.string.need_root_short);
 			} catch (Exception e) {
 				err = "module: " + e.getMessage();
+			}
+
+			// Whether adbd is listening. It is a property on the device, not
+			// part of the module's status, and it is a root call, so it is
+			// asked for here rather than in the render.
+			try {
+				adbWireless = Api.adbWirelessOn();
+			} catch (Exception ignored) {
 			}
 
 			final JSONObject fSt = st;
@@ -3242,6 +3252,27 @@ public class MainActivity extends Activity {
 		action(u, getString(R.string.rollback), null, v -> rollback());
 		action(u, getString(R.string.logs), null, v -> showLogs());
 
+		// ── wireless debugging ──
+		//
+		// adb over TCP, on the phone's Tailscale address. The point of it is
+		// that the Tailscale address does not move: the address on the local
+		// network changes with the lease, and a phone whose address moves is
+		// a phone you cannot reach.
+		//
+		// It is a risk, and it is marked as one. Anything that can reach the
+		// phone on the tailnet, and that has the adb key, has the phone.
+		LinearLayout w = group(pSystem, getString(R.string.wireless_adb_group));
+		addSwitch(w, getString(R.string.wireless_adb_switch),
+				getString(R.string.wireless_adb_sub), adbWireless,
+				v -> confirmWirelessAdb(v.isChecked()));
+		if (adbWireless) {
+			String ip = tsIpv4(st);
+			if (!ip.isEmpty()) {
+				value(w, getString(R.string.wireless_adb_address), ip + ":5555");
+			}
+		}
+		note(w, getString(R.string.wireless_adb_warning));
+
 		LinearLayout a = group(pSystem, getString(R.string.about));
 		action(a, getString(R.string.github_link), null, v -> open(GITHUB_URL));
 		note(pSystem, getString(R.string.credits_body));
@@ -3587,6 +3618,68 @@ public class MainActivity extends Activity {
 				ui.post(() -> toast(getString(R.string.failed, String.valueOf(e.getMessage()))));
 			}
 		}).start();
+	}
+
+	/**
+	 * Turning wireless debugging on is a risk, so it is asked about first.
+	 *
+	 * <p>The switch has already moved by the time this runs, so if the
+	 * answer is no the screen is drawn again to put it back.
+	 */
+	private void confirmWirelessAdb(boolean on) {
+		if (!on) {
+			setWirelessAdb(false);
+			return;
+		}
+		alert()
+				.setTitle(R.string.wireless_adb_switch)
+				.setMessage(R.string.wireless_adb_confirm)
+				.setPositiveButton(R.string.wireless_adb_turn_on, (d, w) -> setWirelessAdb(true))
+				.setNegativeButton(android.R.string.cancel, (d, w) -> {
+					if (status != null) {
+						render(status);
+					}
+				})
+				.show();
+	}
+
+	private void setWirelessAdb(boolean on) {
+		new Thread(() -> {
+			try {
+				Api.adbWireless(on);
+				ui.post(() -> {
+					toast(getString(on ? R.string.wireless_adb_on_toast
+							: R.string.wireless_adb_off_toast));
+					refresh();
+				});
+			} catch (Exception e) {
+				ui.post(() -> {
+					toast(getString(R.string.failed, String.valueOf(e.getMessage())));
+					if (status != null) {
+						render(status);
+					}
+				});
+			}
+		}).start();
+	}
+
+	/** The phone's Tailscale address, the IPv4 one. */
+	private String tsIpv4(JSONObject st) {
+		JSONObject self = st == null ? null : st.optJSONObject("self");
+		if (self == null) {
+			return "";
+		}
+		JSONArray ips = self.optJSONArray("tailscaleIPs");
+		if (ips == null) {
+			return "";
+		}
+		for (int i = 0; i < ips.length(); i++) {
+			String ip = ips.optString(i, "");
+			if (ip.indexOf('.') > 0) {
+				return ip;
+			}
+		}
+		return "";
 	}
 
 	private void confirmSignOut() {

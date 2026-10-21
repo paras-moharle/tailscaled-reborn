@@ -742,6 +742,10 @@ clip_prune() {
 			| $all | map(select((.p // 0) == 1 or ($keepMap[(.t | tostring)] == true))) | .[]
 		' "$CLIP_STORE" > "$_tmp" 2>/dev/null; then
 		mv -f "$_tmp" "$CLIP_STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+		# A file written by the shell gets whatever the umask says, and
+		# the store is meant to be readable by root alone.
+		chmod 0600 "$CLIP_STORE" 2>/dev/null
+		chmod 0600 "$CLIP_STORE" 2>/dev/null
 	else
 		rm -f "$_tmp" 2>/dev/null
 	fi
@@ -763,6 +767,9 @@ clip_mark() {
 		'if ((.t // 0) == $t) then .p = $p else . end' \
 		"$CLIP_STORE" > "$_tmp" 2>/dev/null; then
 		mv -f "$_tmp" "$CLIP_STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+		# A file written by the shell gets whatever the umask says, and
+		# the store is meant to be readable by root alone.
+		chmod 0600 "$CLIP_STORE" 2>/dev/null
 	else
 		rm -f "$_tmp" 2>/dev/null
 	fi
@@ -778,6 +785,9 @@ clip_delete() {
 	if "$JQ" -c --argjson t "$_t" 'select((.t // 0) != $t)' \
 		"$CLIP_STORE" > "$_tmp" 2>/dev/null; then
 		mv -f "$_tmp" "$CLIP_STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+		# A file written by the shell gets whatever the umask says, and
+		# the store is meant to be readable by root alone.
+		chmod 0600 "$CLIP_STORE" 2>/dev/null
 	else
 		rm -f "$_tmp" 2>/dev/null
 	fi
