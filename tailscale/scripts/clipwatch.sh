@@ -51,6 +51,67 @@ now_ms() {
 # The text stays base64 encoded in the store. A shell variable cannot hold a
 # trailing newline, so decoding it here would quietly lose a line every time
 # somebody copied something that ends in one.
+# Did this copy come from a peer?
+#
+# A peer that sends a clip sets the phone's clipboard, and the watcher
+# sees that as a change like any other. Pushing it back would mean two
+# devices pushing the same clip to each other for ever.
+from_peer() {
+	[ -f "$STORE" ] || return 1
+	_last="$(tail -n 1 "$STORE" 2>/dev/null)"
+	[ -n "$_last" ] || return 1
+	[ "$(printf '%s' "$_last" | "${TS_BIN_DIR}/jq" -r '.d // 0' 2>/dev/null)" = "1" ]
+}
+
+# Push the copy to every peer that is online.
+#
+# This is what makes the sharing automatic: a copy made on the phone lands
+# on the other machines' clipboards without anybody asking.
+#
+# The text is the one the watcher already has, so nothing is read from the
+# clipboard again -- reading it means starting a program, and that takes a
+# couple of seconds on this phone.
+#
+# The pushes run in the background. The clipboard service holds its lock
+# while it tells everybody about a change, and a slow push in the middle of
+# that holds it up for everybody.
+share_clip() {
+	_b64="$1"
+	_src="$2"
+	[ -n "$_b64" ] || return 0
+	# It can be switched off, in the clipboard's own configuration.
+	[ "$(clip_conf share true)" = "true" ] || return 0
+	# Not a copy that came from a peer: that would be two machines
+	# pushing the same thing to each other for ever.
+	from_peer && return 0
+	# Nor one that came from the phone's own clipboard sharing. The
+	# computer it came from already has it, and pushing it back is how a
+	# loop starts.
+	case "$_src" in
+	*kdeconnect*) return 0 ;;
+	esac
+	_dir="${TS_DIR}/tmp"
+	mkdir -p "$_dir" 2>/dev/null || return 0
+	_now="$(date +%s 2>/dev/null || echo 0)"
+	_peers="$("${TS_BIN_DIR}/tailscale" status --json 2>/dev/null |
+		"${TS_BIN_DIR}/jq" -r '.Peer | to_entries[] | select(.value.Online == true) | .value.DNSName' 2>/dev/null)"
+	[ -n "$_peers" ] || return 0
+	for _peer in $_peers; do
+		# The name has to be clip-*.clip: the receiver on the other side
+		# looks for that, and anything else is an ordinary file.
+		_mk="$_dir/clip-${_now}-${_peer}.clip"
+		{
+			printf 'TBCLIP1\n'
+			printf '{"t":%s,"s":%s}\n' "$_now" \
+				"$("${TS_BIN_DIR}/jq" -Rn --arg s "$_src" '$s')"
+			printf '%s' "$_b64"
+		} > "$_mk" 2>/dev/null || continue
+		("${TS_BIN_DIR}/tailscale" file cp "$_mk" "${_peer}:" >/dev/null 2>&1
+		 rm -f "$_mk" 2>/dev/null) &
+	done
+	return 0
+}
+
 append_entry() {
 	_text="$1"
 	_src="$2"
@@ -352,6 +413,8 @@ while true; do
 				esac
 			fi
 			append_entry "$_b64" "$_src" 0
+			# And on to the other machines, without anybody asking.
+			share_clip "$_b64" "$_src"
 			;;
 		esac
 	done

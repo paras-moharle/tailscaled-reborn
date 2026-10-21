@@ -252,7 +252,10 @@ deliver() {
                 _src="$(clip_source "$_staged")"
                 rm -f -- "$_staged"
                 log "clipboard received from ${_src:-a peer}"
-                announce_clip "$_src"
+                # No notification. A clipboard arriving is not news, and a
+                # notification for every copy would be a notification for
+                # every copy anybody makes. Only a file that was sent gets
+                # one.
             else
                 log "could not put the clipboard on the computer's clipboard; it stays in $STAGING"
             fi
