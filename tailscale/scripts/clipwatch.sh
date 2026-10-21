@@ -200,11 +200,13 @@ append_entry() {
 		else
 			rm -f "$_tmp" 2>/dev/null
 			printf '%s\n' "$_json" >> "$STORE" 2>/dev/null
+			chmod 0600 "$STORE" 2>/dev/null
 		fi
 		return 0
 	fi
 
 	printf '%s\n' "$_json" >> "$STORE" 2>/dev/null
+	chmod 0600 "$STORE" 2>/dev/null
 
 	# Tell the app, if it is open.
 	#
@@ -310,6 +312,7 @@ prune() {
 		_tmp="${STORE}.tmp.$$"
 		if tail -n "$_keep" "$STORE" > "$_tmp" 2>/dev/null; then
 			mv -f "$_tmp" "$STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+			chmod 0600 "$STORE" 2>/dev/null
 		else
 			rm -f "$_tmp" 2>/dev/null
 			break

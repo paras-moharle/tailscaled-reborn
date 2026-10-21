@@ -230,13 +230,16 @@ EOF
 		if sed '$d' "$_store" > "$_tmp" 2>/dev/null; then
 			printf '%s\n' "$_json" >> "$_tmp" 2>/dev/null
 			mv -f "$_tmp" "$_store" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+			chmod 0600 "$_store" 2>/dev/null
 		else
 			rm -f "$_tmp" 2>/dev/null
 			printf '%s\n' "$_json" >> "$_store" 2>/dev/null
+			chmod 0600 "$_store" 2>/dev/null
 		fi
 		return 0
 	fi
 	printf '%s\n' "$_json" >> "$_store" 2>/dev/null
+	chmod 0600 "$_store" 2>/dev/null
 	# It was a clipboard, and not a file somebody sent, so say so.
 	#
 	# The caller uses this to leave it out of the notification: a clipboard
