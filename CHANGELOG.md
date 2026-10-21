@@ -1,5 +1,23 @@
 ## v1.0.31  2026-10-21
 
+- **The small zip can be installed again.** It could not. The installer
+  asked for the tailscaled build at `/releases/latest/download/...`, and
+  that address points at the newest *module* release — where the daemon is
+  not — because the daemon is published as a **pre-release**, and GitHub's
+  "latest" never points at a pre-release. Every install of the small zip
+  failed with a download error. It now reads the release feed, which names
+  the release the binaries are in, and fetches them from there. The feed
+  itself was fetched from the same broken address, so that is read from
+  the repository now.
+- **jq was fetched by a name that does not exist.** The installer asked for
+  `jq-arm64-linux-android`; upstream publishes `jq-aarch64-linux-android`,
+  and 32-bit ARM as `jq-armv7a-linux-androideabi`. The build had this
+  right and the installer did not, which is why only the full zip ever
+  worked. Both names are right now.
+- **A download is retried** rather than failing the install, and the feed
+  is fetched once instead of three times, so a single hiccup on a small
+  file cannot stop an install.
+
 - **The clipboard history is encrypted.** It was a plain text file. A
   clipboard history is a list of the things you copied, and some of those
   things are passwords and one-time codes, so a copy of the phone's storage

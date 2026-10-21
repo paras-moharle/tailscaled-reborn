@@ -18,23 +18,99 @@
 # rate limit.
 GH_LATEST="https://github.com"
 
+# The feed.
+#
+# It is a file in the repository, and it names the release the binaries are
+# in. That release is a pre-release, and GitHub's /releases/latest/ never
+# points at a pre-release: it points at the newest module zip instead,
+# where the binaries are not. So the tag in the feed has to be used, and
+# "latest" cannot.
+#
+# Asking for /releases/latest/download/latest.json fails for the same
+# reason, which is why the feed is read from the repository itself.
+GH_RAW="https://raw.githubusercontent.com"
+
+# fetch_feed <repo> — the feed, as text.
+#
+# It is fetched once and kept. The version, the tag and the asset name all
+# come out of it, and asking for it three times meant three chances for a
+# hiccup on a small file to stop the install. A hiccup is worth a retry,
+# but not three chances at it.
+FEED_JSON=""
+fetch_feed() {
+	_REPO="$1"
+	if [ -n "$FEED_JSON" ]; then
+		printf '%s' "$FEED_JSON"
+		return 0
+	fi
+	_i=0
+	while [ $_i -lt 3 ]; do
+		FEED_JSON="$(busybox wget --no-check-certificate --timeout=20 -qO- \
+			"${GH_RAW}/${_REPO}/main/tailscale-latest.json" 2>/dev/null)"
+		[ -n "$FEED_JSON" ] && break
+		_i=$((_i + 1))
+		sleep 2
+	done
+	printf '%s' "$FEED_JSON"
+}
+
 # fetch_latest_version <repo> — newest published Android build version.
 fetch_latest_version() {
 	_REPO="$1"
-	wget --no-check-certificate --timeout=20 -qO- \
-		"${GH_LATEST}/${_REPO}/releases/latest/download/latest.json" |
+	fetch_feed "$_REPO" |
 		grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]+"' |
 		cut -d'"' -f4 |
 		head -1
 }
 
-# gh_download <repo> <filename> — fetch a named asset from the latest release.
+# fetch_bin_tag <repo> — the release the binaries are in.
+fetch_bin_tag() {
+	_REPO="$1"
+	fetch_feed "$_REPO" |
+		grep -oE '"tag"[[:space:]]*:[[:space:]]*"[^"]+"' |
+		cut -d'"' -f4 |
+		head -1
+}
+
+# fetch_asset_name <repo> <arch> — the name of the asset for an arch.
+fetch_asset_name() {
+	_REPO="$1"
+	_ARCH="$2"
+	fetch_feed "$_REPO" |
+		tr '{}[],' '\n\n\n\n' |
+		grep -E "\"$_ARCH\"[[:space:]]*:" |
+		head -1 |
+		sed 's/.*:[[:space:]]*"//; s/".*//'
+}
+
+# gh_download <repo> <filename> [tag] — fetch a named asset.
+#
+# The tag is the release the asset is in. Without it the asset is looked
+# for in the newest release, which is right for a repository that does not
+# use pre-releases and wrong for one that does.
 gh_download() {
 	_REPO="$1"
 	_FILENAME="$2"
-	_URL="${GH_LATEST}/${_REPO}/releases/latest/download/${_FILENAME}"
+	_TAG="${3:-}"
+	if [ -n "$_TAG" ]; then
+		_URL="${GH_LATEST}/${_REPO}/releases/download/${_TAG}/${_FILENAME}"
+	else
+		_URL="${GH_LATEST}/${_REPO}/releases/latest/download/${_FILENAME}"
+	fi
 	ui_print "- Downloading $_FILENAME..."
-	if ! wget --no-check-certificate --timeout=100 -qO "$TMPDIR/$_FILENAME" "$_URL"; then
+	# Twice, because a binary that is a few megabytes over a phone's
+	# network is worth a second try before giving up on the install.
+	_ok=0
+	_i=0
+	while [ $_i -lt 2 ]; do
+		if busybox wget --no-check-certificate --timeout=100 -qO "$TMPDIR/$_FILENAME" "$_URL"; then
+			_ok=1
+			break
+		fi
+		_i=$((_i + 1))
+		sleep 3
+	done
+	if [ "$_ok" != "1" ]; then
 		ui_print "! Download failed: $_URL"
 		return 1
 	fi
@@ -120,14 +196,21 @@ done
 
 [ -f "$TS_BIN_DIR/tailscaled" ] || {
 	TS_LATEST_VER="$(fetch_latest_version "$TS_BIN_REPO")"
-	if [ -z "$TS_LATEST_VER" ]; then
+	TS_BIN_TAG="$(fetch_bin_tag "$TS_BIN_REPO")"
+	TS_ASSET="$(fetch_asset_name "$TS_BIN_REPO" "$ARCH")"
+	if [ -z "$TS_LATEST_VER" ] || [ -z "$TS_ASSET" ]; then
 		ui_print "! Could not read the release feed for $TS_BIN_REPO"
-		ui_print "!   $GH_LATEST/$TS_BIN_REPO/releases/latest/download/latest.json"
+		ui_print "!   $GH_RAW/$TS_BIN_REPO/main/tailscale-latest.json"
 		ui_print "! Install the -full.zip instead if you are offline or rate limited."
 		abort "error: Unable to determine the latest tailscaled version."
 	fi
-	ui_print "- Latest published tailscaled: $TS_LATEST_VER"
-	gh_download "$TS_BIN_REPO" "tailscale_${TS_LATEST_VER}_${ARCH}.tgz" ||
+	if [ -z "$TS_BIN_TAG" ]; then
+		ui_print "! The release feed does not say which release the binaries are"
+		ui_print "! in, and 'latest' cannot be used: they are in a pre-release."
+		abort "error: Unable to determine where the tailscaled binaries are."
+	fi
+	ui_print "- Latest published tailscaled: $TS_LATEST_VER (${TS_BIN_TAG})"
+	gh_download "$TS_BIN_REPO" "$TS_ASSET" "$TS_BIN_TAG" ||
 		abort "error: Unable to download tailscaled ${TS_LATEST_VER} (${ARCH})."
 	tar -xzf "$TMPDIR/$FILENAME" -C "$TS_BIN_DIR" || abort "error: Unable extract archive."
 	chmod 0755 "$TS_BIN_DIR/tailscaled"
@@ -157,7 +240,15 @@ fi
 		ui_print "! (32-bit Android is below 0.5% of active devices.)"
 		abort "error: unsupported architecture arm."
 	fi
-	gh_download "theshoqanebi/jq-build-for-android" "jq-${F_ARCH}-linux-android" ||
+	# The asset is named for the architecture upstream publishes it for:
+	# aarch64 and armv7a, not arm64 and arm. Asking for the wrong name
+	# gives a 404 with nothing to say about it.
+	if [ "$ARCH" = "arm" ]; then
+		_JQ_ASSET="jq-armv7a-linux-androideabi"
+	else
+		_JQ_ASSET="jq-aarch64-linux-android"
+	fi
+	gh_download "theshoqanebi/jq-build-for-android" "$_JQ_ASSET" ||
 		abort "error: Unable to download jq."
 	mv -f "$TMPDIR/$FILENAME" "$TS_BIN_DIR/jq" || abort "error: Unable to move file."
 	chmod 0755 "$TS_BIN_DIR/jq"
