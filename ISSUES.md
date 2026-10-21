@@ -274,6 +274,31 @@ The app was read through and used on the phone. What it found:
   even though it is only a race. It retries six hours later. Measured: the
   update check works once the network is up.
 
+### Sending the clipboard to a peer takes a few seconds — v1.0.31
+
+**Measured:** the phone's clipboard took between two and five seconds to
+appear on the desktop.
+
+**Why.** Sending reads the phone's clipboard, and reading it starts a
+program under `app_process` — and a Java program takes about two seconds to
+start on this phone. The crypto desk exists for exactly this reason, but it
+runs as root, and the clipboard has to be read as the shell user or the
+read wipes it.
+
+**The fix, when it is worth doing:** the desk keeps a clipboard reader of
+its own, alive, and asks it instead of starting one per send. The reader
+has to answer a request as well as report changes, and the desk has to
+hold it as a child. A few tens of milliseconds instead of two seconds.
+
+**Also on the phone:** KDE Connect is running, and it keeps its own copy of
+the clipboard — it put a song lyric there repeatedly while the phone's
+clipboard was being tested, and it syncs the clipboard to the desktop as
+well. Two things writing the same clipboard will fight, and the loser is
+whatever was there before. Turning off its clipboard sync is worth doing
+before judging whether the sharing works.
+
+---
+
 ## Not yet looked at
 
 Known to be worth a look, not yet measured:
