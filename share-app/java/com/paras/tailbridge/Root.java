@@ -4,8 +4,10 @@
 package com.paras.tailbridge;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Runs commands as root.
@@ -26,6 +28,23 @@ final class Root {
 			super(m);
 		}
 	}
+
+	// One root shell, kept open.
+	//
+	// Every call used to start a fresh su: a process, a pipe, and a trip
+	// through the root manager. The app asks the module something every
+	// fifteen seconds, and asked for two things at once on a refresh, and
+	// all of it was paying for a new shell to run one command and die.
+	//
+	// The root manager keeps the session alive after a command, so one shell
+	// can serve every call. The end of one command's output is known by a
+	// marker line it prints afterwards.
+	private static final Object LOCK = new Object();
+	private static final String MARK = "__tailbridge_root_done__";
+
+	private static Process proc;
+	private static OutputStreamWriter in;
+	private static BufferedReader out;
 
 	private static Process start() throws Exception {
 		// /system/bin/su is provided by every supported root solution and is
@@ -54,74 +73,115 @@ final class Root {
 		}
 	}
 
+	private static void open() throws Exception {
+		proc = start();
+		in = new OutputStreamWriter(proc.getOutputStream(), StandardCharsets.UTF_8);
+		out = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8));
+	}
+
+	private static void close() {
+		try {
+			if (proc != null) {
+				proc.destroy();
+			}
+		} catch (Throwable ignored) {
+			// Nothing to do about it.
+		}
+		proc = null;
+		in = null;
+		out = null;
+	}
+
+	/**
+	 * Run one command as root and return what it printed.
+	 *
+	 * <p>The command's own error output is folded into its output, so that
+	 * one marker ends both and there is nothing left over for the next
+	 * command to pick up. The exit code comes back on the marker, which is
+	 * how an empty answer is told apart from a refused root shell: a
+	 * command that says nothing and worked is not a failure.
+	 */
 	static String sh(String cmd, long timeoutMs) throws Exception {
-		final Process p = start();
-
-		// Do NOT block on the shell exiting: root managers keep the session
-		// alive after the command, so waitFor() would sit there until the
-		// timeout and the UI would look hung. Write the command, close stdin,
-		// read stdout to EOF, then tear the process down.
-		final StringBuilder out = new StringBuilder();
-		final StringBuilder err = new StringBuilder();
-
-		Thread outReader = pump(p.getInputStream(), out);
-		Thread errReader = pump(p.getErrorStream(), err);
-		outReader.setDaemon(true);
-		errReader.setDaemon(true);
-		outReader.start();
-		errReader.start();
-
-		try (OutputStreamWriter w = new OutputStreamWriter(p.getOutputStream())) {
-			w.write(cmd);
-			w.write("\nexit\n");
-			w.flush();
-		} catch (Exception ignored) {
-			// the shell may already be gone
-		}
-
-		outReader.join(timeoutMs);
-		if (outReader.isAlive()) {
-			p.destroy();
-			throw new Denied("root command timed out");
-		}
-		errReader.join(500);
-		p.destroy();
-
-		// Snapshot under the same monitor the pumps append under: errReader may
-		// still be running here, and StringBuilder is not thread-safe.
-		String text = snapshot(out).trim();
-		String errors = snapshot(err).trim();
-
-		if (text.isEmpty() && errors.isEmpty()) {
+		synchronized (LOCK) {
+			Exception last = null;
+			for (int attempt = 0; attempt < 2; attempt++) {
+				try {
+					return run(cmd, timeoutMs);
+				} catch (Denied d) {
+					throw d;
+				} catch (Exception e) {
+					last = e;
+					// The shell died, or the command hung. Start a new one
+					// and try once more.
+					close();
+				}
+			}
+			if (last instanceof Denied) {
+				throw (Denied) last;
+			}
 			throw new Denied("root permission denied");
 		}
-		if (errors.contains("Permission denied") || errors.contains("not allowed")
-				|| text.contains("Permission denied")) {
-			throw new Denied(errors.isEmpty() ? text : errors);
+	}
+
+	private static String run(String cmd, long timeoutMs) throws Exception {
+		if (proc == null) {
+			open();
+		}
+		StringBuilder sb = new StringBuilder();
+		// The command's errors are folded into its output, so that one
+		// marker ends both. The group keeps the shell alive: `exec` would
+		// replace it, and there would be no shell left for the next call.
+		in.write("{ " + cmd + " < /dev/null ; } 2>&1\n");
+		in.write("printf '%s %s\\n' '" + MARK + "' \"$?\"\n");
+		in.flush();
+
+		// A command that hangs must not hang the app. The watchdog closes
+		// the shell, and the read below then fails.
+		final Thread watchdog = new Thread(() -> {
+			try {
+				Thread.sleep(timeoutMs);
+			} catch (InterruptedException ignored) {
+				return;
+			}
+			close();
+		});
+		watchdog.setDaemon(true);
+		watchdog.start();
+		int code = 0;
+		try {
+			while (true) {
+				String line = out.readLine();
+				if (line == null) {
+					throw new IOException("the root shell ended");
+				}
+				if (line.startsWith(MARK)) {
+					String rest = line.substring(MARK.length()).trim();
+					try {
+						code = Integer.parseInt(rest);
+					} catch (NumberFormatException ignored) {
+						code = 0;
+					}
+					break;
+				}
+				sb.append(line).append('\n');
+			}
+		} finally {
+			watchdog.interrupt();
+		}
+
+		String text = sb.toString().trim();
+		if (text.isEmpty()) {
+			if (code == 0) {
+				// It worked, and it had nothing to say. That is not a
+				// refusal of root.
+				return "";
+			}
+			throw new Denied("root permission denied");
+		}
+		if (text.contains("Permission denied") || text.contains("not allowed")) {
+			throw new Denied(text);
 		}
 		return text;
-	}
-
-	/** Read a buffer the pump threads may still be appending to. */
-	private static String snapshot(StringBuilder sb) {
-		synchronized (sb) {
-			return sb.toString();
-		}
-	}
-
-	private static Thread pump(final java.io.InputStream in, final StringBuilder sink) {
-		return new Thread(() -> {
-			try (BufferedReader r = new BufferedReader(new InputStreamReader(in))) {
-				String line;
-				while ((line = r.readLine()) != null) {
-					synchronized (sink) {
-						sink.append(line).append('\n');
-					}
-				}
-			} catch (Exception ignored) {
-				// stream closed when the process is torn down
-			}
-		});
 	}
 
 	static String sh(String cmd) throws Exception {

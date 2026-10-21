@@ -1044,18 +1044,12 @@ public class MainActivity extends Activity {
 				err = "module: " + e.getMessage();
 			}
 
-			// Whether adbd is listening. It is a property on the device, not
-			// part of the module's status, and it is a root call, so it is
-			// asked for here rather than in the render.
-			try {
-				adbWireless = Api.adbWirelessOn();
-			} catch (Exception ignored) {
-			}
-
 			final JSONObject fSt = st;
 			final String fErr = err;
 			ui.post(() -> {
 				status = fSt;
+				// Whether adbd is listening, out of the same answer.
+				adbWireless = Api.adbWirelessOn(fSt);
 				// The refresh a pull started is now on screen, so the indicator
 				// has done its job. Left alone it would spin forever.
 				hidePullSpinner();

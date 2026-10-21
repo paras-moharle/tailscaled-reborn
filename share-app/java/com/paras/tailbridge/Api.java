@@ -208,16 +208,9 @@ final class Api {
 		String cmd = on
 				? "setprop persist.adb.tcp.port 5555; setprop service.adb.tcp.port 5555"
 				: "setprop persist.adb.tcp.port ''; setprop service.adb.tcp.port ''";
-		// The command says something when it is done.
-		//
-		// A root call that prints nothing is taken to mean that root was
-		// refused, because that is what an empty answer from a refused
-		// root shell looks like. setprop says nothing, so it has to say
-		// something here, or every switch would report that root was
-		// denied.
-		String out = Root.sh(cmd + "; setprop ctl.restart adbd; echo adb-wireless-done", 30_000);
-		if (!out.contains("adb-wireless-done")) {
-			throw new IllegalStateException("the phone did not answer");
+		String out = Root.sh(cmd + "; setprop ctl.restart adbd", 30_000);
+		if (!out.isEmpty()) {
+			throw new IllegalStateException(out);
 		}
 		// adbd needs a moment to come back up.
 		try {
@@ -230,17 +223,16 @@ final class Api {
 	/**
 	 * Whether adbd is listening for TCP connections.
 	 *
-	 * <p>A property that is not set reads as an empty line, which is the
-	 * same as one that has been set to nothing: either way there is no
-	 * port, so either way the answer is no.
+	 * <p>It comes out of the module's status, which the app asks for anyway.
+	 * Reading it separately meant a second root call on every refresh, and
+	 * a root call is a process, a pipe and the root manager.
 	 */
-	static boolean adbWirelessOn() {
-		try {
-			String v = Root.sh("getprop persist.adb.tcp.port", 15_000).trim();
-			return !v.isEmpty();
-		} catch (Exception e) {
+	static boolean adbWirelessOn(JSONObject status) {
+		if (status == null) {
 			return false;
 		}
+		String p = status.optString("adbPort", "").trim();
+		return !p.isEmpty();
 	}
 
 	/**
