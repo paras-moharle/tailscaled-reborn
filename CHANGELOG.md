@@ -17,6 +17,13 @@
 - **A download is retried** rather than failing the install, and the feed
   is fetched once instead of three times, so a single hiccup on a small
   file cannot stop an install.
+- **A file sent to the phone arrived twice.** On a current daemon the same
+  delivery is in two places at once: the daemon puts it in the delivery
+  folder, and `tailscale file get` copies it into the inbox as well. The
+  receiver swept both, so every file was exported twice, and the second
+  copy landed beside the first under a name with a number on the end.
+  The delivery folder holds the daemon's own copy, so that is the one
+  kept, and the pull's copy of it is removed.
 
 - **The clipboard history is encrypted.** It was a plain text file. A
   clipboard history is a list of the things you copied, and some of those

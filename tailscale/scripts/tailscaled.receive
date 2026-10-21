@@ -283,6 +283,9 @@ drain() {
 	exported=""
 	first=""
 	count=0
+	# What has just been exported, as "name size" per line, so that the
+	# same delivery found in the other directory is not exported again.
+	fresh=""
 
 	# $1 = directory.
 	#
@@ -323,6 +326,9 @@ drain() {
 			case "$base" in
 				*.partial) continue ;;
 			esac
+			# The size is read before the file is moved out of the
+			# directory it is in.
+			_size="$(wc -c < "$f" 2>/dev/null || echo 0)"
 			out="$(copy_out "$f")"
 			if [ -z "$out" ]; then
 				# Could not move it out. Leave it and say so once, rather
@@ -334,13 +340,34 @@ drain() {
 			names="${names}${names:+, }$base"
 			exported="${exported}${exported:+, }$(basename "$out")"
 			[ -n "$first" ] || first="$out"
+			# Remember what this was, so that the same delivery found in
+			# the other directory is not exported a second time.
+			fresh="${fresh}${base} ${_size}\n"
 			# A clipboard file is also put into the clipboard and recorded.
 			handle_clip "$out"
 		done
 	}
 
-	sweep "$INBOX"
+	# The daemon's own delivery folder is swept first.
+	#
+	# On a current daemon the same delivery is in two places: the daemon
+	# puts it in the delivery folder, and `tailscale file get` copies it
+	# into the inbox as well. Sweeping both exported every file twice, and
+	# the second copy landed beside the first under a name with a number
+	# on the end. The delivery folder holds the daemon's own copy, so that
+	# is the one kept, and the pull's copy of it is removed.
 	sweep "$DROP_DIR"
+	if [ -n "$fresh" ]; then
+		for f in "$INBOX"/*; do
+			[ -f "$f" ] || continue
+			base="$(basename "$f")"
+			_size="$(wc -c < "$f" 2>/dev/null || echo 0)"
+			if printf '%s' "$fresh" | grep -qxF "$base $_size"; then
+				rm -f "$f" 2>/dev/null
+			fi
+		done
+	fi
+	sweep "$INBOX"
 
 	if [ "$count" -gt 0 ]; then
 		log_line "received ${count}: ${names}"

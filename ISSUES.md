@@ -188,6 +188,31 @@ listens, which has not been done yet.
 
 ---
 
+### A file sent to the phone arrived twice — v1.0.31
+
+**Was:** sending one file to the phone put two copies of it in
+`Downloads/Tailscale`, the second named `something-1.ext`.
+
+**Why.** The receiver watches two places, because the daemon changed where
+it delivers:
+
+- `INBOX` — `tailscale file get` copied deliveries here on older builds.
+- `DROP_DIR` — the daemon delivers here directly on current ones.
+
+On a current daemon the same delivery is in **both**: the daemon writes it
+to the delivery folder, and the pull copies it into the inbox as well. The
+receiver swept both directories in the same cycle, so every file was
+exported twice, and the second export found the name taken and wrote
+`name-1.ext` instead.
+
+**Now:** the daemon's own delivery folder is swept first, and the pull's
+copy of a file that has just been exported is removed.
+
+**Measured on the device:** three files sent to the phone, three files on
+the phone, one copy of each.
+
+---
+
 ## Still open
 
 
