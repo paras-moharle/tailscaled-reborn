@@ -136,20 +136,23 @@ fi
 
 SERVICE_DIR="/data/adb/service.d"
 
-# Release repo that hosts the Android tailscaled builds. These are built from
-# upstream Tailscale with the Android port applied (see builder/ in this repo),
-# so a fresh install gets a current binary instead of whatever the upstream
-# module happened to bundle when it was released.
-# The daemon builds are published as release assets of the archived
-# tailscale-android-cli repo, which is where build-binaries.sh has always
-# uploaded them.
-#
-# The on-device updater reads tailscale-latest.json, whose "repo" field names
-# this repo (tailscaled-reborn). Both repos carry the same assets and the same
-# SHA256SUMS for a given daemon tag, so the installer and the updater both
-# fetch a byte-identical binary. They are separate repositories by history, not
-# by design, but they are kept in step by tagging both.
-TS_BIN_REPO="paras-moharle/tailscale-android-cli"
+  # Release repo that hosts the Android tailscaled builds.
+  #
+  # These are built from upstream Tailscale with the Android port applied
+  # (see builder/ in this repo), so a fresh install gets a current binary
+  # instead of whatever the upstream module happened to bundle when it was
+  # released.
+  #
+  # They used to be published in a second repository, paras-moharle/
+  # tailscale-android-cli, which has been archived: this repository's own
+  # workflow builds them now, and publishes them here as a pre-release.
+  # The old name 404s, which is what stopped the small zip from installing.
+  #
+  # The on-device updater reads tailscale-latest.json, whose "repo" field
+  # names this repository, so the installer and the updater fetch the same
+  # byte-identical binary.
+
+TS_BIN_REPO="paras-moharle/tailscaled-reborn"
 
 TS_DIR="/data/adb/tailscale"
 TS_BIN_DIR="$TS_DIR/bin"

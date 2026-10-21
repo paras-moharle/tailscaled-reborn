@@ -1,7 +1,7 @@
 # Watch upstream Tailscale for a release we have not built yet.
 #
 # Why this exists: the phone's updater reads a feed hosted on OUR releases repo
-# (TS_UPDATE_REPO=paras-moharle/tailscale-android-cli). Upstream publishes no
+# (TS_UPDATE_REPO=paras-moharle/tailscaled-reborn). Upstream publishes no
 # static Android binaries, so when Tailscale cuts a release nothing is available
 # for the phone to find until somebody builds it. Without this workflow
 # "auto-update" really means "auto-install once a human builds and publishes",

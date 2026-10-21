@@ -77,7 +77,20 @@ for ARCH in arm64 arm; do
 		fi
 	fi
 
-	echo "- Downloading ${NAME}..."
+	# The installer has this repository hardcoded in customize.sh, and it is
+# the installer that a person runs when they flash the module. If the two
+# ever disagree, the installer's download 404s and nobody finds out until a
+# phone tries to install it -- which is exactly what happened when the
+# binaries moved out of the archived second repository.
+FEED_REPO_NAME="$(printf '%s' "$FEED_JSON" | jq -r '.repo // empty' 2>/dev/null)" || FEED_REPO_NAME=""
+INSTALLER_REPO="$(grep -oE '^TS_BIN_REPO="[^"]+"' customize.sh 2>/dev/null | head -1 | cut -d'"' -f2)" || INSTALLER_REPO=""
+if [ -n "$FEED_REPO_NAME" ] && [ -n "$INSTALLER_REPO" ] && [ "$FEED_REPO_NAME" != "$INSTALLER_REPO" ]; then
+	echo "!! The installer downloads from ${INSTALLER_REPO} but the feed names ${FEED_REPO_NAME}." >&2
+	echo "!! Every install of the small zip would fail with a download error." >&2
+	exit 1
+fi
+
+echo "- Downloading ${NAME}..."
 	if ! curl -fsSL "$URL" | tar -xz -C "$BIN_DIR"; then
 		echo "!! failed to fetch ${NAME}" >&2
 		exit 1

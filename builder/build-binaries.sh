@@ -28,7 +28,7 @@ done
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
 UPSTREAM="https://github.com/tailscale/tailscale.git"
-TS_UPDATE_REPO="${TS_UPDATE_REPO:-paras-moharle/tailscale-android-cli}"
+TS_UPDATE_REPO="${TS_UPDATE_REPO:-paras-moharle/tailscaled-reborn}"
 
 TAG="${1:-}"
 if [ -z "$TAG" ]; then
