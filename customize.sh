@@ -104,7 +104,7 @@ if [ -d "$TS_DIR" ]; then
 	# history had been moved into a backup nobody was looking at.
 	for p in "$TS_DIR"/*; do
 		case "$(basename "$p")" in
-		ssh | certs | backups | tailscaled.state | clipboard.jsonl | clipboard.conf) ;;
+		ssh | certs | backups | tailscaled.state | clipboard.jsonl | clipboard.conf | clipboard.keyns) ;;
 		*)
 			mv -f -- "$p" "$TS_DIR/backups/$versionCode/"
 			;;

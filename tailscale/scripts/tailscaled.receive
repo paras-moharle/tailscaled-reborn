@@ -198,20 +198,34 @@ EOF
 	# that survives: it knows the text came from a peer and which peer.
 	#
 	# -c: one entry per line, like the watcher writes them.
+	#
+	# The text is encrypted here too, with the same key and the same
+	# helper, so the whole history is ciphertext on disk and not just the
+	# part of it this device copied itself.
 	_store="${TS_CLIP_STORE:-${TS_DIR}/clipboard.jsonl}"
-	_json="$("${TS_BIN_DIR}/jq" -c -n \
-		--argjson t "$(busybox date +%s 2>/dev/null || echo 0)000" \
-		--arg c "$_b64" \
-		--arg s "${_src:-}" \
-		'{t:$t,c:$c,s:$s,d:1,p:0}' 2>/dev/null)"
+	_json="$(printf '%s' "$_b64" | clip_crypto seal "${_src:-}" 1 2>/dev/null)"
+	_h=""
+	if [ -n "$_json" ]; then
+		_h="$(printf '%s' "$_json" | "${TS_BIN_DIR}/jq" -r '.h // ""' 2>/dev/null)"
+	else
+		# No keystore here. The text is written as it is, and the
+		# watcher says out loud that the history is not encrypted.
+		_h="plain:$(printf '%s' "$_b64" | sha256sum 2>/dev/null | cut -d" " -f1)"
+		_json="$("${TS_BIN_DIR}/jq" -c -n \
+			--argjson t "$(busybox date +%s 2>/dev/null || echo 0)000" \
+			--arg c "$_b64" \
+			--arg s "${_src:-}" \
+			--arg h "$_h" \
+			'{t:$t,c:$c,s:$s,d:1,p:0,h:$h}' 2>/dev/null)"
+	fi
 	[ -n "$_json" ] || return 0
 
-	_last_c=""
+	_last_h=""
 	if [ -f "$_store" ]; then
-		_last_c="$(tail -n 1 "$_store" 2>/dev/null |
-			"${TS_BIN_DIR}/jq" -r '.c // ""' 2>/dev/null)"
+		_last_h="$(tail -n 1 "$_store" 2>/dev/null |
+			"${TS_BIN_DIR}/jq" -r '.h // ""' 2>/dev/null)"
 	fi
-	if [ -n "$_last_c" ] && [ "$_last_c" = "$_b64" ]; then
+	if [ -n "$_last_h" ] && [ "$_last_h" = "$_h" ]; then
 		_tmp="${_store}.tmp.$$"
 		if sed '$d' "$_store" > "$_tmp" 2>/dev/null; then
 			printf '%s\n' "$_json" >> "$_tmp" 2>/dev/null

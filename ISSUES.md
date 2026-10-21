@@ -108,6 +108,84 @@ limit that is about **400 KB**, over a root round trip, on every refresh.
 The list is limited and compact now, and the app asks for the two hundred
 it is about to show.
 
+### The clipboard history was a plain text file — v1.0.31
+
+**Was:** the history sat in `/data/adb/tailscale/clipboard.jsonl` as plain
+text, base64 encoded. Base64 is encoding, not encryption. Anyone with a
+copy of the phone's storage could read every password, one-time code and
+private message the user had copied, ever.
+
+**Now**
+
+- The text is encrypted with AES-256-GCM under a key in the device's
+  **hardware keystore**. The key is made on first use, never leaves the
+  secure hardware, and cannot be exported: not by root, and not by anyone
+  holding a copy of the storage.
+- Each entry carries a hash of the text, keyed with a second hardware key,
+  so the watcher can tell that the same thing has been copied twice without
+  decrypting anything — and so the hash of a password cannot be attacked
+  the way a plain hash of one can.
+- An entry that arrives from a peer is encrypted too. It was the one thing
+  in the history that was in the clear.
+- A store written before there was any encryption is sealed when the
+  watcher starts.
+
+**Getting at the keystore took some finding.** The platform keeps it in two
+providers and the zygote registers both for every app it starts; a program
+started with `app_process` is not started by the zygote, so it has to
+register them itself. The first working recipe was found by trying the
+provider's constructors on the device, one at a time.
+
+**The cost of finding out** was that encrypting on every copy would have
+taken about four and a half seconds: a Java program takes two seconds to
+start on this phone, and the keystore takes a moment to answer. So the
+keystore is now held open by a small program that answers over a socket on
+the loopback address. A copy costs about **80 ms**. Every request carries a
+secret from a root-only file, so nothing else on the device can ask it
+anything.
+
+**Measured on the device:** the store on disk holds ciphertext, the app
+shows the history as before, the history survives a reboot with its key,
+and a repeated copy is still collapsed into one entry.
+
+**One thing that is still true:** a factory reset wipes the keystore, and
+with it the key, and a history that cannot be decrypted is a history that
+cannot be read. A module flash does not wipe it.
+
+### The list and the startup both grew with the history — v1.0.31
+
+**Was, in the first version of the encryption:** every `clipboard list`
+opened every entry in the store, and the watcher opened every entry again
+when it started to seal the ones that were still in the clear.
+
+Opening an entry costs the hardware a few milliseconds. At the 5000 entry
+limit that is over a minute and a half for a list, and the same again at
+every start of the watcher.
+
+**Now**
+
+- The list opens only the entries it is returning.
+- What has been opened is kept, so the second list of the same entries is
+  immediate. The text of an entry does not change once it is written.
+- Sealing a store does not open every entry to see whether it is sealed.
+  The hash says: an entry with a hash made by the hardware is sealed, an
+  entry with no hash, or one marked `plain:`, is not.
+- The desk is started at boot, with the watcher, rather than being left to
+  the supervisor's next cycle. Otherwise the first copies after a boot
+  would each pay for a Java program starting up.
+
+**Measured now:** a list of 200 entries takes about 3.5 s the first time and
+is instant after that.
+
+**One thing this leaves, on purpose:** sealing a store that was written in
+the clear costs the hardware about seventy milliseconds an entry, and the
+watcher is not listening while it happens — a copy in that window is
+missed, not corrupted. For a store of a few hundred entries, which is what
+a phone that has had the clipboard history for a few days has, that is a
+second or two, once. For a store of ten thousand entries it is minutes,
+and the right answer is to seal it a piece at a time while the watcher
+listens, which has not been done yet.
+
 ---
 
 ## Still open
@@ -140,6 +218,19 @@ a secret; it does not yet.
 ## Not yet looked at
 
 Known to be worth a look, not yet measured:
+
+- **Images are not in the history.** The clipboard can hold an image, and
+  the helper reads the text and the URI of whatever is there, but not the
+  picture itself. An image is a different size of thing: a picture is
+  megabytes, so it cannot live in the line of text the history is made of.
+  It would need a file of its own, encrypted the same way, with the entry
+  in the history pointing at it, and the app would have to show a
+  thumbnail rather than a line of text. The byte limit would then be the
+  one that matters, rather than the number of entries.
+- **The store's size limit is a constant.** The number of entries and the
+  number of days can be set in `clipboard.conf`, but the byte limit is
+  eight megabytes in the script, and there is no way to change it without
+  editing the module.
 
 - The "N file(s) received" note is fetched once per launch, so it is stale
   for as long as the app is open.

@@ -683,13 +683,46 @@ clip_run() {
 		< "$_in" 2>/dev/null
 }
 
-# One entry of the store, as JSON.
+# The store, with the text readable.
 #
-# The store is JSON lines: one object per line, appended to. Reading it with
-# jq -s turns it into an array, which is what the app wants.
-clip_store_json() {
-	[ -f "$CLIP_STORE" ] || { echo "[]"; return 0; }
-	"$JQ" -s '.' "$CLIP_STORE" 2>/dev/null || echo "[]"
+# On disk the text is encrypted: the key is in the device's hardware
+# keystore, so a copy of the storage is a copy of ciphertext. The helper
+# decrypts the whole file in one pass -- one process for the file, rather
+# than one per entry, which at five thousand entries would take minutes.
+#
+# If the keystore cannot be reached the store is handed over as it is, so
+# the feature keeps working; the watcher says so in the log when that
+# happens.
+clip_store_plain() {
+	# The whole store, with the text readable.
+	#
+	# Only the entries that are asked for are opened. The hardware takes a
+	# few milliseconds for each one, and a history of five thousand entries
+	# would take a minute and a half to open all of it, which is a long
+	# time to hold up a screen.
+	[ -f "$CLIP_STORE" ] || { return 0; }
+	_dec="$(clip_crypto decrypt-store < "$CLIP_STORE" 2>/dev/null)"
+	if [ -n "$_dec" ]; then
+		printf '%s' "$_dec"
+	else
+		cat "$CLIP_STORE" 2>/dev/null
+	fi
+}
+
+# clip_store_tail <how many>
+#
+# The newest entries, with the text readable.
+clip_store_tail() {
+	_n="${1:-200}"
+	[ -f "$CLIP_STORE" ] || { return 0; }
+	_last="$(tail -n "$_n" "$CLIP_STORE" 2>/dev/null)"
+	[ -n "$_last" ] || { return 0; }
+	_dec="$(printf '%s' "$_last" | clip_crypto decrypt-store 2>/dev/null)"
+	if [ -n "$_dec" ]; then
+		printf '%s' "$_dec"
+	else
+		printf '%s' "$_last"
+	fi
 }
 
 # Bring the store within its limits now.
@@ -767,17 +800,23 @@ api_clipboard() {
 		[ "$_n" -gt 5000 ] && _n=5000
 		# -c: one entry per line. Pretty-printed, the same data is three
 		# times the size and the app has to parse all of it.
-		"$JQ" -c -s --argjson n "$_n" 'reverse | .[0:$n] | .[]' \
-			"$CLIP_STORE" 2>/dev/null || echo "[]"
+		#
+		# Only the entries that are asked for are opened. The hardware
+		# takes a few milliseconds for each one.
+		clip_store_tail "$_n" | "$JQ" -c -s --argjson n "$_n" 'reverse | .[0:$n] | .[]' \
+			2>/dev/null || echo "[]"
 		;;
 	search)
 		_q="${1:-}"
 		[ -n "$_q" ] || { err "clipboard: search needs a query"; }
 		# The text is base64 in the store, so it has to be decoded before it
 		# can be matched. jq does that.
-		"$JQ" -s --arg q "$_q" '
+		#
+		# The store is decrypted first: the text on disk is ciphertext, and
+		# there is nothing to match against until it is readable again.
+		clip_store_plain | "$JQ" -s --arg q "$_q" '
 			[ .[] | select((.c | @base64d) | contains($q)) ] | reverse
-		' "$CLIP_STORE" 2>/dev/null || echo "[]"
+		' 2>/dev/null || echo "[]"
 		echo
 		;;
 	get)

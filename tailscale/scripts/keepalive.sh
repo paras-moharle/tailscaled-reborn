@@ -142,6 +142,27 @@ while true; do
 		fi
 	fi
 
+	# The clipboard's crypto desk.
+	#
+	# It is what holds the device's hardware keystore open, so that
+	# recording a copy does not have to wait for a Java program to start --
+	# which on this phone takes a couple of seconds. If it is not running,
+	# the watcher still works, by running the helper on its own every time,
+	# but every copy pays for it.
+	if ! pgrep -f 'com.paras.tailbridge.clip.ClipStore' >/dev/null 2>&1; then
+		log_keepalive "Warning" "The clipboard's crypto desk is not running; starting it again."
+		ensure_clip_dex >/dev/null 2>&1
+		rm -f "${TS_DIR}/clip.port" 2>/dev/null
+		CLASSPATH="${TS_CLIP_DEX_RUN}" nohup app_process /system/bin \
+			com.paras.tailbridge.clip.ClipStore "${TS_DIR}" >>"${TS_RUN_LOG_FILE}" 2>&1 &
+		sleep 2
+		if pgrep -f 'com.paras.tailbridge.clip.ClipStore' >/dev/null 2>&1; then
+			log_keepalive "Info" "The clipboard's crypto desk is running again."
+		else
+			log_keepalive "Error" "The clipboard's crypto desk did not come back up."
+		fi
+	fi
+
 	if ! receiver_running; then
 		log_keepalive "Warning" "The Taildrop receiver was not running; starting it again."
 		"${TS_SCRIPTS_DIR}/tailscaled.receive" stop >/dev/null 2>&1

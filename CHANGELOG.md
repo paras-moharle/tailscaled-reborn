@@ -1,3 +1,42 @@
+## v1.0.31  2026-10-21
+
+- **The clipboard history is encrypted.** It was a plain text file. A
+  clipboard history is a list of the things you copied, and some of those
+  things are passwords and one-time codes, so a copy of the phone's storage
+  was a list of your secrets in the clear. The text is now sealed with
+  AES-256-GCM under a key that lives in the device's **hardware keystore**.
+  The key is made on first use, it never leaves the secure hardware, and it
+  cannot be exported — not by root, and not by anyone holding a copy of the
+  storage. What is on disk is ciphertext.
+- **A repeated copy is still noticed without decrypting anything.** The
+  clipboard service reports every change twice, so the watcher has to know
+  that the second report is the same thing. It used to compare the text
+  with the last entry; the text is encrypted now, so each entry carries a
+  hash of it instead — keyed with the same hardware key, so the hash of a
+  password cannot be attacked the way a plain hash of one can.
+- **An entry that came from a peer is encrypted too.** The receiver wrote
+  the text in the clear, so a clip sent from the desktop was the one thing
+  in the history that was readable.
+- **A device whose keystore cannot be reached says so.** The history is
+  then kept in plain text, and the module says that in its log rather than
+  leaving the user to believe it is protected.
+- **The helper in `/data/local/tmp` is refreshed when it changes.** It was
+  checked for its permissions and not its contents, so a module update left
+  the old helper in place and went on running it.
+- **A copy no longer waits behind a Java program.** A program started with
+  `app_process` takes about two seconds to start on this phone, and the
+  keystore takes a moment to answer, so encrypting on every copy would have
+  put every copy behind a wait of several seconds. There is now a small
+  program that stays running with the keystore open and answers over a
+  socket on the loopback address — about eighty milliseconds a copy. Every
+  request has to carry a secret from a file that only root can read, so
+  nothing else on the device can ask it anything.
+- **Only one watcher at a time.** Two of them would each hear every copy
+  and each write it down, and the history would show everything twice.
+- **A history written before there was encryption is sealed when the
+  watcher starts**, and again every time it starts after that, so anything
+  left in the clear by an older version does not stay in the clear.
+
 ## v1.0.30  2026-10-21
 
 - **The clipboard history survives a module flash.** It did not. Every

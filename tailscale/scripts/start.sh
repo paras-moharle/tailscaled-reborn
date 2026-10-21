@@ -54,6 +54,24 @@ start_clipwatch() {
   return 0
 }
 
+# The clipboard's crypto desk.
+#
+# It holds the device's hardware keystore open, so that recording a copy
+# does not have to wait for a Java program to start, which takes a couple of
+# seconds on this phone. It is started here rather than left to the
+# supervisor, so that the first copy after a boot is as quick as the rest.
+start_clipdesk() {
+  for PID in $(pgrep -f 'com.paras.tailbridge.clip.ClipStore' 2>/dev/null); do
+    [ "$PID" = "$$" ] && continue
+    kill -9 "$PID" 2>/dev/null
+  done
+  rm -f "${TS_DIR}/clip.port" 2>/dev/null
+  ensure_clip_dex >/dev/null 2>&1
+  CLASSPATH="${TS_CLIP_DEX_RUN}" nohup app_process /system/bin \
+    com.paras.tailbridge.clip.ClipStore "${TS_DIR}" >>"/dev/null" 2>&1 &
+  return 0
+}
+
 # The supervisor. The boot script runs once; anything that kills the daemon
 # after that left the phone with no Tailscale and no error to explain it.
 # This is the thing that notices and puts it back.
@@ -88,4 +106,5 @@ start_service || log Error "The daemon did not start."
 start_inotifyd || log Error "The inotify watcher did not start."
 start_receiver || log Error "The Taildrop receiver did not start."
 start_keepalive || log Error "The supervisor did not start."
+start_clipdesk || log Error "The clipboard's crypto desk did not start."
 start_clipwatch || log Error "The clipboard watcher did not start."

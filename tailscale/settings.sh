@@ -125,6 +125,95 @@ TS_CLIP_DEX_RUN="${TS_CLIP_DEX_RUN:-/data/local/tmp/tailbridge-clip.dex}"
 TS_CLIP_CLASS="com.paras.tailbridge.clip.ClipBoard"
 TS_CLIP_STORE="${TS_CLIP_STORE:-${TS_DIR}/clipboard.jsonl}"
 
+# The crypto helper, and how to run it.
+#
+# The key is in the device's hardware keystore, so the history on disk is
+# ciphertext that a copy of the storage cannot read. The helper has to run as
+# root, because that is whose keystore namespace the key belongs to, and
+# because it is the one that can read the store.
+TS_CLIP_CRYPTO_CLASS="com.paras.tailbridge.clip.ClipCrypto"
+
+# clip_crypto <mode> [args...]
+#
+# Base64 in, base64 out, or a whole store in and out.
+#
+# The keystore keeps a separate set of keys for every user of the device,
+# so the helper has to run as the same user every time: a history written
+# with root's key cannot be read with the shell's. Which user works is
+# asked once and remembered, in a file that is kept when the module is
+# flashed, because a history that suddenly cannot be read is worse than no
+# history at all.
+#
+# Root is tried first. Some devices will not generate a key for a process
+# with no package behind it, and the shell uid is the fallback: it has its
+# own namespace in the same keystore, and a key there is just as much a
+# key that cannot be copied out of the hardware.
+clip_crypto_who() {
+	_who="$(cat "${TS_DIR}/clipboard.keyns" 2>/dev/null)"
+	case "$_who" in
+	root | shell) printf '%s' "$_who"; return 0 ;;
+	esac
+	_who=root
+	if ! CLASSPATH="$TS_CLIP_DEX" app_process /system/bin "$TS_CLIP_CRYPTO_CLASS" probe >/dev/null 2>&1; then
+		_who=shell
+		# The shell uid cannot read /data/adb, so it uses the copy of
+		# the helper that lives where the shell can reach it.
+		_dex="$TS_CLIP_DEX_RUN"
+		if ! su 2000 -c "CLASSPATH='$_dex' app_process /system/bin $TS_CLIP_CRYPTO_CLASS probe" >/dev/null 2>&1; then
+			# Neither works. The keystore cannot be reached from
+			# here, and the history will have to be kept in plain
+			# text, which the watcher says out loud.
+			printf ''
+			return 1
+		fi
+	fi
+	printf '%s' "$_who" > "${TS_DIR}/clipboard.keyns" 2>/dev/null
+	printf '%s' "$_who"
+}
+
+clip_crypto() {
+	# The text goes in on stdin and the answer comes out on stdout.
+	_mode="$1"
+	shift
+	_cmd="$_mode"
+	for _a in "$@"; do
+		_cmd="$_cmd $_a"
+	done
+	_payload="$(cat 2>/dev/null)"
+
+	# The desk.
+	#
+	# It is a program that stays running with the keystore open, so the
+	# work takes a few tens of milliseconds. The alternative -- running the
+	# helper on its own -- takes a couple of seconds on this phone, and
+	# that is a couple of seconds on every copy.
+	_port="$(cat "${TS_DIR}/clip.port" 2>/dev/null)"
+	_token="$(cat "${TS_DIR}/clip.token" 2>/dev/null)"
+	if [ -n "$_port" ] && [ -n "$_token" ]; then
+		_out="$(printf '%s\n%s\n%s' "$_token" "$_cmd" "$_payload" |
+			nc -w 15 127.0.0.1 "$_port" 2>/dev/null)"
+		case "$_out" in
+		'' | err:*) ;;
+		*)
+			printf '%s' "$_out"
+			return 0
+			;;
+		esac
+	fi
+
+	# The helper on its own. It does the same work, slowly.
+	[ -f "$TS_CLIP_DEX" ] || return 1
+	_who="$(clip_crypto_who)"
+	[ -n "$_who" ] || return 1
+	if [ "$_who" = "root" ]; then
+		printf '%s' "$_payload" | CLASSPATH="$TS_CLIP_DEX" app_process /system/bin \
+			"$TS_CLIP_CRYPTO_CLASS" "$_mode" "$@" 2>/dev/null
+	else
+		printf '%s' "$_payload" | su 2000 -c "CLASSPATH='$TS_CLIP_DEX_RUN' app_process /system/bin \
+			$TS_CLIP_CRYPTO_CLASS $_mode $*" 2>/dev/null
+	fi
+}
+
 # clip_conf <key> [default]
 #
 # One setting from the clipboard's configuration file.
@@ -158,12 +247,20 @@ clip_conf_set() {
 
 ensure_clip_dex() {
 	[ -f "$TS_CLIP_DEX" ] || return 1
-	# Already there and already read-only for the caller: nothing to do.
+	# Already there, already read-only for the caller, and already the same
+	# file: nothing to do.
+	#
+	# The comparison is on the contents and not only on the permissions.
+	# The copy in /data/local/tmp is the one that actually runs, and a
+	# module update brings a new helper; leaving the old one in place
+	# would mean running last month's helper for ever.
 	if [ -f "$TS_CLIP_DEX_RUN" ]; then
 		_perm="$(ls -l "$TS_CLIP_DEX_RUN" 2>/dev/null | cut -c1-10)"
 		case "$_perm" in
 		r--------r-------- | r--------r--r-- | r--r--r--r-- | r--r--r---)
-			return 0
+			if cmp -s "$TS_CLIP_DEX" "$TS_CLIP_DEX_RUN" 2>/dev/null; then
+				return 0
+			fi
 			;;
 		esac
 	fi

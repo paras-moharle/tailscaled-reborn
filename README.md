@@ -178,27 +178,70 @@ not a database — see below for where it is and what that means.
 
 ### Where the history is kept, and what that means
 
-It is a plain text file, not a database:
+It is a file of JSON lines, not a database:
 
 ```
 /data/adb/tailscale/clipboard.jsonl
 ```
 
-One JSON object per line, the text inside it base64 encoded.
+One JSON object per line. **The text in it is encrypted.** A clipboard
+history is a list of things people copied, and some of those things are
+passwords, one-time codes and private messages, so the text is sealed with
+a key that lives in the device's **hardware keystore** — the same secure
+element that holds the fingerprint and the payment keys. The key is made on
+first use, it never leaves the hardware, and it cannot be exported: not by
+root, not by anyone with a copy of the storage.
+
+```
+/data/adb/tailscale/clipboard.jsonl
+{"t":1757803210123,"c":"qXs9...","h":"1mYd...","s":"com.android.chrome","d":0,"p":0}
+```
+
+`t` when it was copied, `c` the encrypted text, `h` a hash of the text
+keyed with the same hardware key, `s` the app it came from, `d` whether it
+arrived from a peer, `p` whether it is starred.
 
 | | |
 |---|---|
 | **Permissions** | `0600`, owned by root |
 | **The directory** | `/data/adb` is mode `0700` root, so no app can reach it — not even a system app |
-| **Against other apps** | Safe. Only root can open it |
-| **Against root** | Root reads it. On a rooted phone, root can read everything anyway |
-| **Against a copy of `/data`** | **Readable in plain text.** Base64 is encoding, not encryption |
-| **Reboots** | It survives |
+| **Against other apps** | Safe. Only root can open it, and what is inside is ciphertext anyway |
+| **Against root** | Root can ask the hardware to use the key, so root can read it. On a rooted phone, root can read everything anyway |
+| **Against a copy of `/data`** | **Ciphertext.** The key is in the hardware, and a copy of the storage does not carry it |
+| **Reboots** | It survives. The key lives in the keystore, and the keystore is part of `/data` |
 | **Flashing a new module** | It survives. An earlier version moved it into a backup folder, which is why a flashed phone came back with an empty history |
+| **A factory reset** | **It does not survive.** The reset wipes the keystore, and the key with it, and a history that cannot be decrypted is a history that cannot be read |
 
 It is not in the app's own storage on purpose: the watcher that records it
 runs as root, and the app reads it through the module. If it lived in the
 app's directory, the app could not read it without root either.
+
+The `h` field is there so the watcher can tell that the same thing has been
+copied twice — the clipboard service reports every change twice — without
+decrypting anything. It is keyed with the hardware key rather than being a
+plain hash, so the hash of a password cannot be attacked the way a plain
+hash of one can.
+
+**How the keystore is reached** is a little involved, and worth writing
+down. The platform keeps the keystore in two providers — one that holds the
+keys and makes them, one that does the cryptography — and the zygote
+registers both for every app it starts. The module's helper is not started
+by the zygote, so it registers them itself. Reaching the hardware from a
+program the zygote did not fork was not obvious, and it took a while to
+work out.
+
+A Java program on this phone takes about two seconds to start, and the
+keystore takes a moment to answer, so running the helper once per copy
+would put every copy behind a wait of several seconds. So there is a small
+program that stays running with the keystore open and answers over a
+socket on the loopback address. Every request has to carry a secret from a
+file that only root can read, so nothing else on the device can ask it
+anything. The supervisor starts it at boot and starts it again if it dies.
+
+**A factory reset wipes the keystore's keys**, and with them the history: a
+phone that has been wiped cannot read a history that was encrypted on it
+before. A module flash does not — that leaves `/data` alone, and the key
+lives there.
 
 **What to do about a clipboard history that holds secrets.** Put the app
 that copies the secret on the ignore list, and its copies are never written
@@ -208,6 +251,20 @@ down at all:
 # /data/adb/tailscale/clipboard.conf
 ignore=com.example.passwordmanager
 ```
+
+**If the keystore cannot be reached** — a device whose secure hardware does
+not answer, or one where the keystore refuses a key for a process with no
+package behind it — the history is written as plain text instead, and the
+module says so in its log:
+
+```sh
+# /data/adb/tailscale/run/runs.log
+1761000000 [Warning]: The clipboard history cannot be encrypted on this device; it is being stored as plain text.
+```
+
+That is a deliberate choice over failing: a clipboard history in plain text
+is not as good as an encrypted one, but it is a history, and the warning is
+there to be noticed.
 
 ### What it does not do
 

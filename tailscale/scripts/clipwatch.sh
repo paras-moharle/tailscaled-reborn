@@ -55,18 +55,57 @@ append_entry() {
 	_text="$1"
 	_src="$2"
 	_dir="${3:-0}"
-	# -c: one entry per line. Without it jq pretty-prints the object over
-	# several lines, and the store stops being a list of lines.
-	_json="$("${TS_BIN_DIR}/jq" -c -n \
-		--argjson t "$(now_ms)" \
-		--arg c "$_text" \
-		--arg s "$_src" \
-		--argjson d "$_dir" \
-		'{t:$t,c:$c,s:$s,d:$d,p:0}' 2>/dev/null)" || return 0
+
+	# The text is encrypted before it is written down, with a key that lives
+	# in the device's hardware keystore. The key never leaves the secure
+	# hardware, so what lands on disk is ciphertext: a copy of the storage is
+	# a copy of something that cannot be read, not a list of passwords.
+	#
+	# The helper writes a keyed hash of the text beside the ciphertext. That
+	# is what lets the watcher notice that the same thing has been copied
+	# again without decrypting anything -- and because the hash is keyed with
+	# the hardware key, the hash of a password cannot be attacked the way a
+	# plain hash of one can.
+	_sealed="$(printf '%s' "$_text" | clip_crypto seal "$_src" "$_dir" 2>/dev/null)"
+	_json=""
+	_h=""
+	if [ -n "$_sealed" ]; then
+		_json="$_sealed"
+		_h="$(printf '%s' "$_sealed" | "${TS_BIN_DIR}/jq" -r '.h // ""' 2>/dev/null)"
+	fi
+
+	if [ -z "$_json" ]; then
+		# The keystore is not available on this device. Say so, once, and
+		# keep working -- but the history is plain text while this lasts, and
+		# the user has to be told that rather than left to assume otherwise.
+		[ -f "${TS_RUN_DIR}/clip-crypto-warned" ] || {
+			echo "$(date +%s) [Warning]: The clipboard history cannot be encrypted on this device; it is being stored as plain text." \
+				>>"${TS_RUN_LOG_FILE}" 2>/dev/null
+			touch "${TS_RUN_DIR}/clip-crypto-warned" 2>/dev/null
+		}
+		# Without a key there is no keyed hash, so a plain one stands in.
+		# It only ever has to tell two copies of the same text apart.
+		#
+		# It is marked "plain:" so that it can be told apart from the hash
+		# of a sealed entry later, and sealed then. A sealed entry's hash is
+		# base64, which never contains a colon.
+		_h="plain:$(printf '%s' "$_text" | sha256sum 2>/dev/null | cut -d" " -f1)"
+		_json="$("${TS_BIN_DIR}/jq" -c -n \
+			--argjson t "$(now_ms)" \
+			--arg c "$_text" \
+			--arg s "$_src" \
+			--argjson d "$_dir" \
+			--arg h "$_h" \
+			'{t:$t,c:$c,s:$s,d:$d,p:0,h:$h}' 2>/dev/null)" || return 0
+	fi
 	[ -n "$_json" ] || return 0
 	_keep="$_json"
 
+
 	# The same text again is not a new entry.
+	#
+	# The comparison is on the keyed hash, because the text itself is
+	# encrypted on disk and cannot be read back to compare it.
 	#
 	# The clipboard service reports a single change twice -- the listener is
 	# called once for the user and once for the device -- so every copy
@@ -74,12 +113,13 @@ append_entry() {
 	# that cannot be trusted to show what was actually copied is worse than
 	# no history. So the last entry is replaced rather than added to, which
 	# also keeps the time of the most recent copy.
-	_last_c=""
+	_last=""
+	_last_h=""
 	if [ -f "$STORE" ]; then
-		_last_c="$(tail -n 1 "$STORE" 2>/dev/null |
-			"${TS_BIN_DIR}/jq" -r '.c // ""' 2>/dev/null)"
+		_last="$(tail -n 1 "$STORE" 2>/dev/null)"
+		_last_h="$(printf '%s' "$_last" | "${TS_BIN_DIR}/jq" -r '.h // ""' 2>/dev/null)"
 	fi
-	if [ -n "$_last_c" ] && [ "$_last_c" = "$_text" ]; then
+	if [ -n "$_last_h" ] && [ "$_last_h" = "$_h" ]; then
 		# Keep what the last entry already knew if it knew more. A clip
 		# that arrived from a peer is recorded by the receiver with the
 		# peer's name and marked as coming from a peer; the watcher then
@@ -235,6 +275,42 @@ chmod 0600 "$STORE" 2>/dev/null
 # by anybody but root. Put the read-only copy in its place, and put it back
 # if something removes it.
 ensure_clip_dex >/dev/null 2>&1
+
+# Only one watcher at a time.
+#
+# Two of them would each hear every copy and each write it down, and the
+# history would show everything twice. The lock is held for as long as the
+# watcher runs, and the kernel takes it away if the watcher dies, so a
+# watcher that was killed leaves nothing behind.
+mkdir -p "$TS_RUN_DIR" 2>/dev/null
+_lock="${TS_RUN_DIR}/clipwatch.pid"
+_mine=$$
+if [ -f "$_lock" ]; then
+	# Is the watcher that took the lock still there?
+	_old="$(cat "$_lock" 2>/dev/null | head -1)"
+	if [ -n "$_old" ] && [ -d "/proc/$_old" ] &&
+		tr '\000' ' ' < "/proc/$_old/cmdline" 2>/dev/null | grep -q 'clipwatch.sh'; then
+		echo "another clipboard watcher is already running" >&2
+		exit 0
+	fi
+fi
+printf '%s\n' "$_mine" > "$_lock" 2>/dev/null
+
+# Encrypt a store that was written before there was any encryption, so the
+# old entries do not sit there in plain text for ever.
+#
+# It runs every time the watcher starts, not just the first time. Sealing
+# something that is already sealed leaves it exactly as it is, so this is
+# safe to repeat, and doing it again catches anything that was written in
+# the clear in between -- by an older version of the watcher, say.
+if [ -s "$STORE" ]; then
+	_tmp="${STORE}.enc.$$"
+	if clip_crypto encrypt-store < "$STORE" > "$_tmp" 2>/dev/null && [ -s "$_tmp" ]; then
+		mv -f "$_tmp" "$STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+	else
+		rm -f "$_tmp" 2>/dev/null
+	fi
+fi
 
 _count=0
 while true; do
