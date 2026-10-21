@@ -240,6 +240,40 @@ a secret; it does not yet.
 
 ---
 
+### The app's audit — v1.0.31
+
+The app was read through and used on the phone. What it found:
+
+**Fixed**
+
+- **Every switch reported that root was refused.** A root call that prints
+  nothing is taken to mean that root was denied, because that is what an
+  empty answer from a refused root shell looks like. `setprop` prints
+  nothing, so the new wireless debugging switch always said "root
+  permission denied" — after it had already done the thing. The command
+  says when it is done now.
+- **The store's permissions were `0666`.** The README said `0600`. Every
+  rewrite of the store — sealing it, starring an entry, deleting one,
+  pruning it — wrote a new file and took whatever the shell's umask said.
+  The mode is put back now, in all four places.
+
+**Still to look at**
+
+- **The "SNAT subnet routes" switch does nothing on Android.** The daemon
+  runs with `NetfilterMode: 2`, which is the userspace mode with netfilter
+  off, so there is nothing for SNAT to change. The switch reports the
+  daemon's own setting honestly, but turning it on and off has no effect
+  and the screen does not say so. It should either be hidden or marked.
+- **"Advertise as exit node" on a phone with netfilter off.** The daemon
+  forwards traffic fine, but the masquerading that normally hides the
+  phone's address behind it is a netfilter thing. Whether an exit node on
+  this phone works, and what the other side sees, has not been measured.
+- **The updater can lose a race at boot.** It waits eight times, twenty
+  seconds apart, and gives up. On a phone that takes longer than that to
+  get onto the network, the feed is unreachable and the message says so
+  even though it is only a race. It retries six hours later. Measured: the
+  update check works once the network is up.
+
 ## Not yet looked at
 
 Known to be worth a look, not yet measured:
