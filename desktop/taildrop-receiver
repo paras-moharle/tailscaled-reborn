@@ -165,6 +165,59 @@ note_stuck() {
     log "could not store $_n; it stays in $STAGING"
 }
 
+# A clipboard is not a file.
+#
+# The phone sends the clipboard as a Taildrop file whose first line is the
+# magic "TBCLIP1". It is put on the computer's clipboard and then removed:
+# what was copied belongs on the clipboard, and the clipboard manager keeps
+# its own history of that. Leaving a file behind as well would put the
+# same text in two places, and the file would be the one that outlived the
+# clipboard.
+is_clip() {
+    [ -f "$1" ] || return 1
+    [ "$(head -1 -- "$1" 2>/dev/null)" = "TBCLIP1" ]
+}
+
+# The source a clipboard came from, out of its metadata line.
+clip_source() {
+    sed -n '2p' -- "$1" 2>/dev/null |
+        sed -n 's/.*"s"[ ]*:[ ]*"\([^"]*\)".*/\1/p'
+}
+
+# The text of a clipboard, decoded.
+clip_text() {
+    _b64="$(tail -n +3 -- "$1" 2>/dev/null | tr -d '\n')"
+    [ -n "$_b64" ] || return 1
+    printf '%s' "$_b64" | base64 -d 2>/dev/null
+}
+
+# Put text on the computer's clipboard.
+#
+# Wayland first, then X11. xclip is told to fork, because the clipboard it
+# holds dies with it; wl-copy keeps the selection itself.
+set_clipboard() {
+    _text="$1"
+    [ -n "$_text" ] || return 1
+    if command -v wl-copy >/dev/null 2>&1; then
+        printf '%s' "$_text" | wl-copy -- 2>/dev/null && return 0
+    fi
+    if command -v xclip >/dev/null 2>&1; then
+        printf '%s' "$_text" | xclip -selection clipboard -in 2>/dev/null && return 0
+    fi
+    if command -v xsel >/dev/null 2>&1; then
+        printf '%s' "$_text" | xsel --clipboard --input 2>/dev/null && return 0
+    fi
+    return 1
+}
+
+# Say that a clipboard arrived.
+announce_clip() {
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -a "Taildrop" -u critical \
+            "Clipboard received" "From ${1:-a peer}" >/dev/null 2>&1 || true
+    fi
+}
+
 # Returns how many files it moved, on stdout.
 announce() {
     _path="$1"
@@ -192,6 +245,19 @@ deliver() {
         case "${_staged##*/}" in
             *.partial) continue ;;
         esac
+        # A clipboard goes on the clipboard.
+        if is_clip "$_staged"; then
+            _text="$(clip_text "$_staged")"
+            if [ -n "$_text" ] && set_clipboard "$_text"; then
+                _src="$(clip_source "$_staged")"
+                rm -f -- "$_staged"
+                log "clipboard received from ${_src:-a peer}"
+                announce_clip "$_src"
+            else
+                log "could not put the clipboard on the computer's clipboard; it stays in $STAGING"
+            fi
+            continue
+        fi
         if _target="$(claim_path "$_staged")" && [ -n "$_target" ]; then
             _got=$((_got + 1))
             log "collected: ${_staged##*/} -> $_target"

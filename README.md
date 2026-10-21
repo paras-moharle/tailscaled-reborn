@@ -115,6 +115,33 @@ It fetches into a staging directory of its own and moves results out, so it
 never touches your other downloads. Names are taken atomically, so two
 arrivals that want the same name cannot collide.
 
+### The clipboard, both ways
+
+A clipboard sent from the phone arrives as a file whose first line is the
+magic `TBCLIP1`. The receiver knows that, and puts the text **on the
+computer's clipboard** instead of in a folder — and then deletes the file,
+because the clipboard manager keeps its own history of what was copied. It
+does not land in `~/Downloads` as a file you have to open.
+
+The other direction is a command:
+
+```sh
+send-clipboard <peer>            # by name, or by 100.x.x.x
+send-clipboard <peer> "a name"    # what the peer should call it
+```
+
+It reads this computer's clipboard, wraps it in the same format, and pushes
+it to the peer, where the phone's receiver puts it on the phone's clipboard
+and records it in the phone's history.
+
+To install it:
+
+```sh
+curl -Lo ~/.local/bin/send-clipboard \
+  https://raw.githubusercontent.com/paras-moharle/tailscaled-reborn/main/desktop/send-clipboard
+chmod +x ~/.local/bin/send-clipboard
+```
+
 **Omarchy already ships a receiver.** Two collectors watching the same place
 race for the same file. Before enabling this one, stop whatever is already
 collecting:

@@ -38,6 +38,22 @@
   something that is not there is worse than no switch.
 - **"Use an exit node" stays.** That is the other direction — the phone
   sending its traffic through another device — and the phone can do that.
+- **A clipboard sent to the phone arrives on the computer's clipboard**, not
+  as a file in `~/Downloads`. The receiver recognises the magic line the
+  phone writes, puts the text on the clipboard, and removes the delivery —
+  the clipboard manager keeps its own history of what was copied, so a file
+  as well would be the same text in two places, and the file would be the
+  one that outlived the clipboard.
+- **The other direction works too**: `send-clipboard <peer>` reads this
+  computer's clipboard and pushes it to the phone, where the receiver puts
+  it on the phone's clipboard and records it in the phone's history.
+- **The updater waits for the network for fifteen minutes** instead of
+  three. A phone coming up on cellular can take a long time to have a
+  route, and giving up meant the phone ran whatever it was flashed with
+  until the next attempt. It says so as a wait rather than as a failure.
+- **The app asks for root once per refresh instead of twice.** The module
+  reports whether adbd is listening as part of its status, so the app does
+  not need a second root call for one number.
 - **A file sent to the phone arrived twice.** On a current daemon the same
   delivery is in two places at once: the daemon puts it in the delivery
   folder, and `tailscale file get` copies it into the inbox as well. The

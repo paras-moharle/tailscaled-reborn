@@ -164,6 +164,7 @@ api_status() {
 		--arg supervisor "$_supervisor" \
 		--arg latest "$_latest" \
 		--arg feed "$_feed_state" \
+		--arg adbport "$(getprop persist.adb.tcp.port 2>/dev/null)" \
 		'
 	  def arr(x): x // [];
 	  ($st) as $s | ($pf) as $p |
@@ -176,6 +177,13 @@ api_status() {
 	    module: $mod,
 	    latest: $latest,
 	    feed: $feed,
+	    # Whether adbd is listening for TCP connections, and on what port.
+	    #
+	    # It is here so that the app can read it without asking for root a
+	    # second time on every refresh. A root call is a process, a pipe and
+	    # the root manager, and the app was making two of them every fifteen
+	    # seconds for one number.
+	    adbPort: $adbport,
 	    tailnet: {
 	      name: ($s.CurrentTailnet.Name // ""),
 	      magicDNS: ($s.CurrentTailnet.MagicDNSEnabled // false),

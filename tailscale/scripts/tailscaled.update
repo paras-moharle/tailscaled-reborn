@@ -264,19 +264,26 @@ cmd_run() {
 	# next boot failed the same way, and the daemon never updated at all.
 	#
 	# The run is in the background, so waiting costs nothing.
+	#
+	# Fifteen minutes, not three. A phone coming up on cellular can take a
+	# long time to have a route, and giving up on it means the phone runs
+	# whatever it was flashed with until the next attempt.
 	_attempt=0
-	while [ "$_attempt" -lt "${TS_UPDATE_ATTEMPTS:-8}" ]; do
+	while [ "$_attempt" -lt "${TS_UPDATE_ATTEMPTS:-30}" ]; do
 		feed_reachable && break
 		_attempt=$((_attempt + 1))
-		[ "$_attempt" -ge "${TS_UPDATE_ATTEMPTS:-8}" ] && break
-		log Info "The release feed is not reachable yet; waiting."
-		sleep "${TS_UPDATE_RETRY_WAIT:-20}"
+		[ "$_attempt" -ge "${TS_UPDATE_ATTEMPTS:-30}" ] && break
+		log Info "The release feed is not reachable yet; the network is probably not up. Waiting."
+		sleep "${TS_UPDATE_RETRY_WAIT:-30}"
 	done
 
 	if ! feed_reachable; then
 		# Nobody knows whether there is an update. Say so, and do not
 		# stamp: this is tried again rather than being skipped for a day.
-		log Error "Could not reach the release feed; will try again later."
+		# This is a race with the network coming up, not a failure of the
+		# feed, and saying it as a failure would send whoever is reading
+		# the log looking for a problem with the release.
+		log Error "Still no network after waiting; there is no way to tell whether there is an update. Will try again later."
 		write_state "feed-unreachable"
 		ensure_daemon_running || true
 		return 1

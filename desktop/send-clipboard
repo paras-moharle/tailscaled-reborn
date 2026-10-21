@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# send-clipboard — put this computer's clipboard on a tailnet peer.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026 paras-moharle
+#
+# The other direction of the same thing: the phone can send its clipboard
+# here, and this sends this computer's clipboard there.
+#
+# The clipboard goes over as a Taildrop file whose first line is the magic
+# "TBCLIP1", which is what the receiver on the other side looks for. The
+# phone's receiver already understands that: it puts the text on the
+# phone's clipboard and records it in the phone's history.
+#
+#   send-clipboard <peer>            # by name, or by 100.x.x.x
+#   send-clipboard <peer> "a name"    # what the peer should call it
+#
+# The peer can be a tailnet name ("oneplus-cph2491-1"), a Tailscale IP, or
+# anything else the Tailscale CLI accepts after a colon.
+set -uo pipefail
+
+PEER="${1:-}"
+LABEL="${2:-$(hostname 2>/dev/null || echo "this computer")}"
+CLI="${TAILDROP_CLI:-tailscale}"
+
+if [ -z "$PEER" ]; then
+    echo "usage: send-clipboard <peer> [label]" >&2
+    exit 2
+fi
+
+if ! command -v "$CLI" >/dev/null 2>&1; then
+    echo "no '$CLI' on PATH" >&2
+    exit 127
+fi
+
+# ── Read the clipboard ────────────────────────────────────────────────────
+#
+# Wayland first, then X11. The order matters: a Wayland session usually
+# has an Xwayland display as well, and the X11 clipboard and the Wayland
+# one are separate things.
+if [ -n "${WAYLAND_DISPLAY:-}" ] && command -v wl-paste >/dev/null 2>&1; then
+    TEXT="$(wl-paste --no-newline 2>/dev/null)"
+elif command -v xclip >/dev/null 2>&1; then
+    TEXT="$(xclip -selection clipboard -out 2>/dev/null)"
+elif command -v xsel >/dev/null 2>&1; then
+    TEXT="$(xsel --clipboard --output 2>/dev/null)"
+else
+    echo "no way to read the clipboard found (wl-paste, xclip or xsel)" >&2
+    exit 127
+fi
+
+if [ -z "$TEXT" ]; then
+    echo "the clipboard is empty" >&2
+    exit 1
+fi
+
+# ── Make the file ────────────────────────────────────────────────────────
+#
+# The format is the phone's: a magic line, a line of metadata, and then the
+# text in base64.
+TMP="$(mktemp -d 2>/dev/null)" || {
+    echo "could not make a temporary directory" >&2
+    exit 1
+}
+trap 'rm -rf "$TMP"' EXIT
+
+NAME="clip-$(date +%s).clip"
+B64="$(printf '%s' "$TEXT" | base64 -w0 2>/dev/null || printf '%s' "$TEXT" | base64 | tr -d '\n')"
+ESCAPED="$(printf '%s' "$LABEL" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+
+{
+    printf 'TBCLIP1\n'
+    printf '{"t":%s,"s":"%s"}\n' "$(date +%s 2>/dev/null || echo 0)" "$ESCAPED"
+    printf '%s' "$B64"
+} > "$TMP/$NAME"
+
+# ── Send it ──────────────────────────────────────────────────────────────
+#
+# The CLI wants "host:path" for a file on a peer, and the path is a
+# directory. So the file is sent to a directory on the peer that the
+# receiver there watches.
+if ! "$CLI" file cp "$TMP/$NAME" "${PEER}:"; then
+    echo "the send failed" >&2
+    exit 1
+fi
+
+echo "the clipboard was sent to $PEER"
