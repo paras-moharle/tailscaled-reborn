@@ -105,11 +105,8 @@
 	<string name="d_shields_up">Block incoming connections</string>
 	<string name="t_ssh">Tailscale SSH</string>
 	<string name="d_ssh">Let tailnet members SSH in</string>
-	<string name="t_webclient">Web client</string>
 	<string name="d_webclient">Serve the admin UI on this device</string>
-	<string name="t_adv_exit">Advertise as exit node</string>
 	<string name="d_adv_exit">Share this device\'s internet</string>
-	<string name="t_snat">SNAT subnet routes</string>
 	<string name="d_snat">Masquerade subnet traffic to this device</string>
 	<string name="hostname">Device name</string>
 	<string name="hostname_hint">Device name</string>

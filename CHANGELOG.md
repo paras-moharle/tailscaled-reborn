@@ -25,6 +25,19 @@
   root. **It is a risk and it says so**: anything that can reach the phone
   on the tailnet, and that has your adb key, has the phone. Turning it on
   is asked about first.
+- **Three switches that did nothing are gone.** "SNAT subnet routes" and
+  "Advertise as exit node" were the daemon's own settings, and neither of
+  them can work on a phone: the daemon runs with netfilter off, which is
+  what a phone has to run with, and the netfilter rules are what rewrite
+  the address of traffic leaving through another device. The exit-node
+  route was not accepted by the tailnet's policy either — measured on the
+  desktop, which is not a phone, and it was not accepted there either.
+  "Web client" was the same: the daemon took the setting and said the
+  interface was running on port 5252, and nothing answered, while the
+  same thing on the desktop answered with a page. A switch that reports
+  something that is not there is worse than no switch.
+- **"Use an exit node" stays.** That is the other direction — the phone
+  sending its traffic through another device — and the phone can do that.
 - **A file sent to the phone arrived twice.** On a current daemon the same
   delivery is in two places at once: the daemon puts it in the delivery
   folder, and `tailscale file get` copies it into the inbox as well. The

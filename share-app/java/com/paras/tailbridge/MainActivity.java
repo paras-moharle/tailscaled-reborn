@@ -3102,11 +3102,30 @@ public class MainActivity extends Activity {
 
 		LinearLayout c2 = group(pSettings, getString(R.string.services));
 		addToggle(c2, "run-ssh", getString(R.string.t_ssh), "", flags, online);
-		addToggle(c2, "run-webclient", getString(R.string.t_webclient), "", flags, online);
+		// The web client is not offered.
+		//
+		// The daemon takes the setting and says the interface is running,
+		// and then nothing answers on the port: measured on this phone, and
+		// the same on a desktop where it does work, so it is the port and
+		// not the setting. A switch that reports something that is not
+		// there is worse than no switch.
 
 		LinearLayout c3 = group(pSettings, getString(R.string.this_device));
-		addToggle(c3, "advertise-exit-node", getString(R.string.t_adv_exit), "", flags, online);
-		addToggle(c3, "snat-subnet-routes", getString(R.string.t_snat), "", flags, online);
+		// The phone cannot be an exit node, and it does not masquerade.
+		//
+		// The daemon runs with netfilter off, which is what a phone has to
+		// run with, and the netfilter rules are what rewrite the address
+		// of traffic leaving through another device. So a phone that
+		// offered itself as an exit node would take the other device's
+		// traffic and drop it, and there would be no way for anyone to
+		// tell that from the exit node simply being unreachable.
+		//
+		// The two switches that set those things are gone rather than
+		// left there doing nothing. A switch that does nothing is worse
+		// than no switch: it says the phone can do a thing it cannot.
+		//
+		// Using another device as an exit node is the other direction,
+		// and that the phone can do, so that row stays.
 
 		// The clipboard.
 		//
