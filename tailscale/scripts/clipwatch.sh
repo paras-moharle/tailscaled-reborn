@@ -225,6 +225,8 @@ chmod 0600 "$STORE" 2>/dev/null
 	printf 'watch=true\n' > "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
 	printf 'max=5000\n' >> "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
 	printf 'days=0\n' >> "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
+	printf 'ignore=\n' >> "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
+	printf 'days=0\n' >> "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
 	chmod 0600 "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
 }
 
@@ -248,12 +250,28 @@ while true; do
 			# startup, so switching the recording off takes effect at
 			# once instead of whenever the watcher is restarted.
 			_watch="$(clip_conf watch true)"
+		_ignore="$(clip_conf ignore '')"
 			# Recording can be switched off.
 			[ "$_watch" = "true" ] || continue
 			_rest="${_line#changed:}"
 			_b64="$(printf '%s' "$_rest" | cut -d'|' -f1)"
 			_src="$(printf '%s' "$_rest" | cut -d'|' -f2-)"
 			[ "$_src" = "$_rest" ] && _src=""
+			# An app the user has said to leave alone.
+			#
+			# This is the one that matters. A password manager and a
+			# banking app both put their secrets on the clipboard, and a
+			# history that keeps them is a history that can be sent to
+			# another machine by one tap. An ignored app's copies are
+			# never written down at all.
+			#
+			# The list is in the clipboard's own configuration, as
+			# "ignore=com.one,com.two".
+			if [ -n "$_ignore" ] && [ -n "$_src" ]; then
+				case ",${_ignore}," in
+				*",${_src},"*) continue ;;
+				esac
+			fi
 			append_entry "$_b64" "$_src" 0
 			;;
 		esac

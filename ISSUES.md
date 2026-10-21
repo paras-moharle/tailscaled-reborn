@@ -74,40 +74,46 @@ method. It now compiles the way the app does: `--release 11 -classpath`.
 
 ---
 
-## Still open
+## Fixed
 
-### 1. "Is the daemon running" can be fooled
+### The clipboard history did not survive a module flash — v1.0.30
 
-`api_status` and the supervisor both ask
+Every install moved everything out of `/data/adb/tailscale/` into a backup
+folder, and the clipboard's history and settings went with it. A phone that
+was flashed came back with an empty history and a reset limit. The
+installer keeps them now, and what had already been moved aside was put
+back.
+
+### "Is the daemon running" could be fooled — v1.0.30
+
+It asked
 
 ```sh
 busybox pgrep -f 'tailscaled -no-logs'
 ```
 
-which matches **any** process whose command line contains that string.
+which matches **any** process whose command line contains that string. A
+diagnostic shell whose own command line mentioned the daemon made the API
+report `daemon: running` while the daemon was stopped, and the supervisor
+uses the same test, so it could fail to restart a daemon that had really
+died — the one job it has.
 
-This bit during this work: a diagnostic shell whose own command line
-mentioned the daemon made the API report `daemon: running` while the daemon
-was stopped. The supervisor uses the same test, so it could fail to restart
-a daemon that had really died — the one job it has.
+It is `pgrep -x tailscaled` now, which matches the process name exactly.
 
-**Fix**: `pgrep -x tailscaled`, which matches the process name exactly and
-cannot be matched by a command line that merely mentions it.
+### The app fetched the whole clipboard history, every time — v1.0.30
 
-### 2. The app fetches the whole clipboard history, every time
+`clipboard list` returned every entry, pretty-printed. At the 5000 entry
+limit that is about **400 KB**, over a root round trip, on every refresh.
 
-`clipboard list` returns every entry, pretty-printed. Measured at 20
-entries: 2387 bytes in 141 ms. At the 5000 entry limit that is about
-**400 KB**, over a root round trip, on every refresh — and a refresh happens
-on every broadcast.
+The list is limited and compact now, and the app asks for the two hundred
+it is about to show.
 
-**Fix**
+---
 
-- A limit on the API, and the app asks for the few hundred it is about to
-  show.
-- Compact output rather than pretty-printed.
+## Still open
 
-### 3. The desktop cannot use a clipboard the phone sends
+
+### 1. The desktop cannot use a clipboard the phone sends
 
 The phone sends the clipboard as a Taildrop file named `clip-*.clip`. The
 desktop receiver treats it as an ordinary file and drops it in
@@ -117,7 +123,7 @@ puts it on the desktop's clipboard.
 The desktop already has `wl-copy`, `wl-paste`, `xclip` and `xsel`
 installed, so this is a small change to `desktop/taildrop-receiver`.
 
-### 4. A new release never updates the app
+### 2. A new release never updates the app
 
 Every build signs the app with a key generated on the spot, so two releases
 have different signatures and Android refuses to replace one with the other.

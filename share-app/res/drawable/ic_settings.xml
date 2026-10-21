@@ -1,25 +1,48 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Settings: sliders.
+<!-- Settings: a gear.
 
-     The knobs are filled rather than outlined. Outlined, at this size, they
-     turn into dashes — a ring two pixels across with a hole in the middle
-     reads as a broken line at 23dp. Filled, they read as knobs. -->
+     Eight teeth and a ring. The sliders that were here before read as
+     "adjust these values" rather than "the things you configure", and
+     a gear is the one symbol everybody already has in their head for it.
+     The teeth are drawn as short strokes off a circle rather than as one
+     path, which keeps the outline clean at 23dp instead of turning the
+     corners to mush. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
 	android:width="24dp" android:height="24dp"
 	android:viewportWidth="24" android:viewportHeight="24">
-	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.8"
-		android:strokeLineCap="round" android:fillColor="#00000000"
-		android:pathData="M4,7 L20,7" />
-	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.8"
-		android:strokeLineCap="round" android:fillColor="#00000000"
-		android:pathData="M4,12 L20,12" />
-	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.8"
-		android:strokeLineCap="round" android:fillColor="#00000000"
-		android:pathData="M4,17 L20,17" />
-	<path android:fillColor="#FFECEFF3" android:strokeWidth="0"
-		android:pathData="M9.2,7 m-2.2,0 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0" />
-	<path android:fillColor="#FFECEFF3" android:strokeWidth="0"
-		android:pathData="M15.4,12 m-2.2,0 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0" />
-	<path android:fillColor="#FFECEFF3" android:strokeWidth="0"
-		android:pathData="M7.4,17 m-2.2,0 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+		android:strokeLineCap="round"
+		android:fillColor="#00000000"
+		android:pathData="M12,4.0 L12,6.1" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+		android:strokeLineCap="round"
+		android:fillColor="#00000000"
+		android:pathData="M6.5,6.5 L8.0,8.0" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+		android:strokeLineCap="round"
+		android:fillColor="#00000000"
+		android:pathData="M4.0,12 L6.1,12" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+		android:strokeLineCap="round"
+		android:fillColor="#00000000"
+		android:pathData="M6.5,17.5 L8.0,16.0" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+		android:strokeLineCap="round"
+		android:fillColor="#00000000"
+		android:pathData="M12,20.0 L12,17.9" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+		android:strokeLineCap="round"
+		android:fillColor="#00000000"
+		android:pathData="M17.5,17.5 L16.0,16.0" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+		android:strokeLineCap="round"
+		android:fillColor="#00000000"
+		android:pathData="M20.0,12 L17.9,12" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+		android:strokeLineCap="round"
+		android:fillColor="#00000000"
+		android:pathData="M17.5,6.5 L16.0,8.0" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+		android:fillColor="#00000000"
+		android:pathData="M12,6.4 A5.6,5.6 0 1,0 12,17.6 A5.6,5.6 0 1,0 12,6.4 Z" />
 </vector>

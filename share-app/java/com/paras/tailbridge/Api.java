@@ -221,12 +221,24 @@ final class Api {
 	 * are arbitrary text that ends in one more often than not.
 	 */
 	static JSONArray clipboardList() throws Exception {
-		String out = callRaw(DEFAULT_TIMEOUT_MS, "clipboard", "list");
-		int i = out.indexOf('[');
-		if (i < 0) {
-			return new JSONArray();
+		// The module answers with one JSON object per line, newest first,
+		// and only as many as were asked for. Asking for the whole store
+		// meant a few hundred kilobytes over a root round trip every
+		// time the list was refreshed.
+		String out = callRaw(DEFAULT_TIMEOUT_MS, "clipboard", "list", "200");
+		JSONArray arr = new JSONArray();
+		for (String line : out.split("\n")) {
+			line = line.trim();
+			if (line.isEmpty()) {
+				continue;
+			}
+			try {
+				arr.put(new JSONObject(line));
+			} catch (Exception ignored) {
+				// A line that is not an object is not worth stopping for.
+			}
 		}
-		return new JSONArray(out.substring(i).trim());
+		return arr;
 	}
 
 	/** The clipboard right now, not the last one recorded. */

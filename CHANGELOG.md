@@ -1,3 +1,29 @@
+## v1.0.30  2026-10-21
+
+- **The clipboard history survives a module flash.** It did not. Every
+  install moved everything out of the module's directory into a backup
+  folder, and the clipboard's history and its settings went with it, so a
+  phone that was flashed came back with an empty history and a reset limit.
+  They are kept now, and what had already been moved aside was put back.
+- **The settings screen is a list, not a wall.** Every setting had a
+  sentence under it, and a sentence per row turns a list of switches into
+  text. The rows are one line each now, and the state is on the right.
+- **The switches read as switches.** The track of an off switch was the
+  same colour as the card it sat on, so the whole thing looked like a
+  plain dot.
+- **A new settings icon.** A gear, drawn as eight teeth off a ring. The
+  sliders that were there read as "adjust these values" rather than "the
+  things you configure".
+- **"Is the daemon running?" can no longer be fooled.** The check matched
+  any process whose command line mentioned the daemon, which a shell
+  running a command that mentioned it did. The API would then report a
+  daemon that was not running as running, and the supervisor would
+  believe it and never restart it — the one job it has. The check is on
+  the process name now.
+- **The app asks for the entries it is about to show.** It fetched the
+  whole history, pretty printed, over a root round trip, on every
+  refresh — about 400 KB of it at the limit.
+
 ## v1.0.29  2026-10-21
 
 - **The clipboard is instant.** A copy used to take up to ten seconds to

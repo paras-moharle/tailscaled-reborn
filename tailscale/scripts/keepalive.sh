@@ -35,7 +35,10 @@ set +e
 INTERVAL=30
 
 daemon_running() {
-	busybox pgrep -f 'tailscaled -no-logs' >/dev/null 2>&1
+	# The name, not the command line: see the note in tailscaled.api. A
+	# false match here means the supervisor thinks a dead daemon is alive
+	# and never restarts it, which is the one thing it is for.
+	busybox pgrep -x tailscaled >/dev/null 2>&1
 }
 
 receiver_running() {

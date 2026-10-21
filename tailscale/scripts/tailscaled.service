@@ -49,10 +49,15 @@ program(){
   # log Debug "post_down ${post_down}"
 
   program_name=$(echo "$command" | awk '{print $1}' | xargs basename)
+  # The process name, not the whole command line. `pgrep -f` matches any
+  # process whose command line contains the text, so a shell that merely
+  # mentions the daemon counts as the daemon -- and a daemon that is
+  # reported as running cannot be stopped or restarted.
+  # pgrep -x matches the name exactly, which is what program_name is.
   log_file="${logdir}/${program_name}.log"
   pid_file="${logdir}/${program_name}.pid"
   is_running(){
-    if PID=$(busybox pgrep -f "${command}"); then
+    if PID=$(busybox pgrep -x "${program_name}"); then
       log Info "✔ ${program_name} service is running with PID: ${PID}."
       return 0
     fi
@@ -89,7 +94,7 @@ program(){
   }
   stop(){
     log Info "Stopping ${program_name} service."
-    if PID=$(busybox pgrep -f "${command}"); then
+    if PID=$(busybox pgrep -x "${program_name}"); then
       if [ ! -z "${pre_down}" ];then $pre_down  2>&1; fi
       # Use `busybox pkill` to kill the binary with signal 15, otherwise use `killall`.
       if busybox pkill -f -15 -e "${command}" >/dev/null 2>&1; then
@@ -103,7 +108,7 @@ program(){
       return 0
     fi
     sleep 3 # wait the binary has stopped properly
-    if ! busybox pgrep -f "${command}" >/dev/null 2>&1; then
+    if ! busybox pgrep -x "${program_name}" >/dev/null 2>&1; then
       log Info "✘ ${program_name} shutting down, service is stopped."
       log Info "✘ ${program_name} disconnected."
       if [ ! -z "${post_down}" ];then $post_down  2>&1; fi
@@ -124,7 +129,7 @@ program(){
         fi
       fi
       sleep 2
-      if ! busybox pgrep -f "${command}" >/dev/null 2>&1; then
+      if ! busybox pgrep -x "${program_name}" >/dev/null 2>&1; then
         log Info "✔ done, you can sleep peacefully."
         if [ ! -z "${post_down}" ];then post_down  2>&1; fi
         [ -t 1 ] && echo "${yellow}--------------------------------------------${normal}"

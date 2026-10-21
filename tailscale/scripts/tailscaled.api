@@ -114,7 +114,16 @@ api_status() {
 	[ -n "$_ver" ] || _ver=unknown
 
 	_daemon=stopped
-	busybox pgrep -f 'tailscaled -no-logs' >/dev/null 2>&1 && _daemon=running
+	# The process name, not the whole command line.
+	#
+	# `pgrep -f 'tailscaled -no-logs'` matches any process whose command
+	# line happens to contain that text -- a shell running a command that
+	# mentions the daemon, for instance. That is not a rare thing to
+	# happen, and when it does the API reports a daemon that is not
+	# running as running, and the supervisor believes the same and never
+	# restarts it. `pgrep -x` matches the name exactly, and the daemon's
+	# name is exactly "tailscaled".
+	busybox pgrep -x tailscaled >/dev/null 2>&1 && _daemon=running
 
 	ensure_supervisor
 	_supervisor=stopped
@@ -747,9 +756,19 @@ api_clipboard() {
 	shift 2>/dev/null || true
 	case "$_cmd" in
 	list)
-		# Newest first. The whole store is returned; the app pages it.
-		"$JQ" -s 'reverse' "$CLIP_STORE" 2>/dev/null | head -c 4000000
-		echo
+		# Newest first, and only as many as were asked for.
+		#
+		# The whole store was returned before, pretty-printed, over a root
+		# round trip, on every refresh. At the 5000 entry limit that is
+		# about 400 KB each time, which is a lot of work to do several
+		# times a minute for a list nobody is looking at that far down.
+		_n="${1:-200}"
+		case "$_n" in '' | *[!0-9]*) _n=200 ;; esac
+		[ "$_n" -gt 5000 ] && _n=5000
+		# -c: one entry per line. Pretty-printed, the same data is three
+		# times the size and the app has to parse all of it.
+		"$JQ" -c -s --argjson n "$_n" 'reverse | .[0:$n] | .[]' \
+			"$CLIP_STORE" 2>/dev/null || echo "[]"
 		;;
 	search)
 		_q="${1:-}"

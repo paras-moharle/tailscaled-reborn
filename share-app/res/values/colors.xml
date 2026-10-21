@@ -31,6 +31,12 @@
 	<color name="text2">#FF9AA5B5</color>
 	<color name="hint">#FF616D7E</color>
 
+	<!-- A switch that is off still has to look like a switch. The track was
+	     the same colour as the card it sat on, so the whole thing read as
+	     a plain dot. -->
+	<color name="trackOff">#3DFFFFFF</color>
+	<color name="thumbOff">#FF8A94A3</color>
+
 	<!--The one accent in the app. It marks the single primary action and
 	     nothing else, so "Send" is always the thing your eye lands on. -->
 	<color name="accent">#FF3D8BFF</color>

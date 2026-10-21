@@ -97,9 +97,14 @@ if [ -d "$TS_DIR" ]; then
 	versionCode=$(grep '^versionCode=' "$PROP_FILE" | cut -d= -f2)
 	# shellcheck disable=SC2154
 	rm -rf "$TS_DIR/backups/$versionCode/" && mkdir -p "$TS_DIR/backups/$versionCode/"
+	# Everything a new version replaces is set aside, so a flash does not
+	# leave a half-written file behind. The clipboard's own files are not
+	# that: they are history and settings, and a phone that was flashed
+	# came back with an empty clipboard and a reset limit, because the
+	# history had been moved into a backup nobody was looking at.
 	for p in "$TS_DIR"/*; do
 		case "$(basename "$p")" in
-		ssh | certs | backups | tailscaled.state) ;;
+		ssh | certs | backups | tailscaled.state | clipboard.jsonl | clipboard.conf) ;;
 		*)
 			mv -f -- "$p" "$TS_DIR/backups/$versionCode/"
 			;;

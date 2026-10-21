@@ -104,13 +104,13 @@ public class MainActivity extends Activity {
 		sw.setTextOn("");
 		sw.setTextOff("");
 		sw.setThumbTintList(android.content.res.ColorStateList.valueOf(
-				getColor(on ? R.color.text : R.color.hint)));
+				getColor(on ? R.color.text : R.color.thumbOff)));
 		sw.setTrackTintList(new android.content.res.ColorStateList(
 				new int[][] {
 						new int[] { android.R.attr.state_checked },
 						new int[] { },
 				},
-				new int[] { getColor(R.color.accent), getColor(R.color.surfaceHi) }));
+				new int[] { getColor(R.color.accent), getColor(R.color.trackOff) }));
 		return sw;
 	}
 
@@ -1528,8 +1528,7 @@ public class MainActivity extends Activity {
 		final int max = cfg.optInt("max", 5000);
 		final String ignore = cfg.optString("ignore", "");
 
-		addSwitch(g, getString(R.string.clip_t_watch), getString(R.string.clip_d_watch),
-				watch, b -> {
+		addSwitch(g, getString(R.string.clip_t_watch), "", watch, b -> {
 					new Thread(() -> {
 						try {
 							Api.clipboardSet("watch", b.isChecked() ? "true" : "false");
@@ -1547,7 +1546,7 @@ public class MainActivity extends Activity {
 		// three values, and a person who wants two thousand entries should
 		// not have to choose between one thousand and five thousand.
 		action(g, getString(R.string.clip_t_keep),
-				getString(R.string.clip_d_keep) + "  ·  " + getString(R.string.clip_kept, max),
+				getString(R.string.clip_kept, max),
 				v -> showKeepEditor(max));
 
 		// How long to keep it.
@@ -1557,7 +1556,7 @@ public class MainActivity extends Activity {
 		// matter are the recent ones. Zero days means keep them for ever.
 		final int days = cfg.optInt("days", 0);
 		action(g, getString(R.string.clip_t_days),
-				getString(R.string.clip_d_days) + "  ·  " + getString(R.string.clip_kept_days, days),
+				getString(R.string.clip_kept_days, days),
 				v -> showDaysEditor(days));
 
 		action(g, getString(R.string.clip_clear), null, v -> confirmClearClipboard());
@@ -3069,12 +3068,9 @@ public class MainActivity extends Activity {
 		boolean online = daemonUp(st);
 
 		LinearLayout c1 = group(pSettings, getString(R.string.connectivity));
-		addToggle(c1, "accept-dns", getString(R.string.t_accept_dns),
-				getString(R.string.d_accept_dns), flags, online);
-		addToggle(c1, "accept-routes", getString(R.string.t_accept_routes),
-				getString(R.string.d_accept_routes), flags, online);
-		addToggle(c1, "shields-up", getString(R.string.t_shields_up),
-				getString(R.string.d_shields_up), flags, online);
+		addToggle(c1, "accept-dns", getString(R.string.t_accept_dns), "", flags, online);
+		addToggle(c1, "accept-routes", getString(R.string.t_accept_routes), "", flags, online);
+		addToggle(c1, "shields-up", getString(R.string.t_shields_up), "", flags, online);
 
 		// Use an exit node.
 		//
@@ -3090,21 +3086,17 @@ public class MainActivity extends Activity {
 		if (online) {
 			final String curIp = currentExitNodeIp(st);
 			final List<Api.Peer> finalCands = candidates;
-			action(c1, getString(R.string.t_use_exit),
-					exitNodeSummary(st) + "  ·  " + getString(R.string.d_use_exit),
+			action(c1, getString(R.string.t_use_exit), exitNodeSummary(st),
 					v -> showExitNodePicker(st, finalCands));
 		}
 
 		LinearLayout c2 = group(pSettings, getString(R.string.services));
-		addToggle(c2, "run-ssh", getString(R.string.t_ssh), getString(R.string.d_ssh), flags, online);
-		addToggle(c2, "run-webclient", getString(R.string.t_webclient),
-				getString(R.string.d_webclient), flags, online);
+		addToggle(c2, "run-ssh", getString(R.string.t_ssh), "", flags, online);
+		addToggle(c2, "run-webclient", getString(R.string.t_webclient), "", flags, online);
 
 		LinearLayout c3 = group(pSettings, getString(R.string.this_device));
-		addToggle(c3, "advertise-exit-node", getString(R.string.t_adv_exit),
-				getString(R.string.d_adv_exit), flags, online);
-		addToggle(c3, "snat-subnet-routes", getString(R.string.t_snat),
-				getString(R.string.d_snat), flags, online);
+		addToggle(c3, "advertise-exit-node", getString(R.string.t_adv_exit), "", flags, online);
+		addToggle(c3, "snat-subnet-routes", getString(R.string.t_snat), "", flags, online);
 
 		// The clipboard.
 		//

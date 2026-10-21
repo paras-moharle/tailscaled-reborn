@@ -4,7 +4,7 @@ Tailscale on a rooted Android phone: the daemon built from upstream, kept up to
 date on its own, with a companion app for sending files and a desktop
 integration for the other direction.
 
-[![module](https://img.shields.io/badge/module-v1.0.29-4ea1ff)](module.prop)
+[![module](https://img.shields.io/badge/module-v1.0.30-4ea1ff)](module.prop)
 [![tailscale](https://img.shields.io/badge/tailscale-1.104.1-3ddc84)](https://tailscale.com)
 [![license](https://img.shields.io/badge/license-BSD--3--Clause-a78bfa)](LICENSE)
 
@@ -30,7 +30,7 @@ integration for the other direction.
 
 ## Install
 
-1. Download **`Tailscaled-Reborn-v1.0.29-full.zip`** from
+1. Download **`Tailscaled-Reborn-v1.0.30-full.zip`** from
    [the releases page](https://github.com/paras-moharle/tailscaled-reborn/releases).
 2. **Magisk / KernelSU → Modules → Install from storage.**
 3. Reboot.
@@ -173,9 +173,41 @@ built from source with `javac` and `d8`, and it is not a separate dependency.
   it. ART refuses to load a dex file the caller could modify, and it does so
   by aborting with no message at all.
 
-The history itself lives in the module, not in the app: `/data/adb/tailscale/clipboard.jsonl`,
-one JSON object per line, at most 5,000 entries and 8 MB, oldest dropped
-first. The app reads it through the module's API.
+The history lives in the module, not in the app. It is a plain text file,
+not a database — see below for where it is and what that means.
+
+### Where the history is kept, and what that means
+
+It is a plain text file, not a database:
+
+```
+/data/adb/tailscale/clipboard.jsonl
+```
+
+One JSON object per line, the text inside it base64 encoded.
+
+| | |
+|---|---|
+| **Permissions** | `0600`, owned by root |
+| **The directory** | `/data/adb` is mode `0700` root, so no app can reach it — not even a system app |
+| **Against other apps** | Safe. Only root can open it |
+| **Against root** | Root reads it. On a rooted phone, root can read everything anyway |
+| **Against a copy of `/data`** | **Readable in plain text.** Base64 is encoding, not encryption |
+| **Reboots** | It survives |
+| **Flashing a new module** | It survives. An earlier version moved it into a backup folder, which is why a flashed phone came back with an empty history |
+
+It is not in the app's own storage on purpose: the watcher that records it
+runs as root, and the app reads it through the module. If it lived in the
+app's directory, the app could not read it without root either.
+
+**What to do about a clipboard history that holds secrets.** Put the app
+that copies the secret on the ignore list, and its copies are never written
+down at all:
+
+```sh
+# /data/adb/tailscale/clipboard.conf
+ignore=com.example.passwordmanager
+```
 
 ### What it does not do
 
