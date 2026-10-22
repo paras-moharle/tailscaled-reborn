@@ -149,28 +149,40 @@ copy_out() {
 # clipboard service clear the user's clipboard instead of setting it: the
 # service checks that the calling process owns the package it claims to be,
 # and root does not own com.android.shell.
+#
+# What it returns matters, and it used to be the wrong way round:
+#
+#   0  this was a clipboard, and it has been handled. Nothing to announce.
+#   1  this was not a clipboard. It is an ordinary file somebody sent.
+#   2  this was a clipboard that could not be handled. It is kept, and
+#      nothing is announced for it either -- a clipboard is never a file
+#      transfer, even when it went wrong.
+#
+# The caller used to read a "1" as success, which meant every clipboard was
+# counted as a received file and every clipboard raised the notification
+# that is supposed to be for files only.
 handle_clip() {
 	_file="$1"
 	base="$(basename "$_file")"
 	case "$base" in
 	clip-*.clip) ;;
-	*) return 0 ;;
+	*) return 1 ;;
 	esac
 
 	# The magic line has to be there. A file that merely ends in .clip is an
 	# ordinary file and is left alone.
 	_magic="$(head -1 "$_file" 2>/dev/null)"
-	[ "$_magic" = "TBCLIP1" ] || return 0
+	[ "$_magic" = "TBCLIP1" ] || return 1
 
 	_meta="$(sed -n '2p' "$_file" 2>/dev/null)"
 	_b64="$(tail -n +3 "$_file" 2>/dev/null | tr -d '\n')"
-	[ -n "$_b64" ] || return 0
+	[ -n "$_b64" ] || return 2
 
 	_text="$("${TS_BIN_DIR}/jq" -R -r '@base64d' <<EOF 2>/dev/null
 $_b64
 EOF
 )"
-	[ -n "$_text" ] || return 0
+	[ -n "$_text" ] || return 2
 
 	_src="$("${TS_BIN_DIR}/jq" -r '.s // ""' <<EOF 2>/dev/null
 $_meta
@@ -178,16 +190,25 @@ EOF
 )"
 
 	# Put it in the clipboard.
+	#
+	# The payload travels as an argument, not stdin. stdin does not survive
+	# the app_process spawn on this device -- a pipe or a redirect that gets
+	# through to `su 2000 -c cat` arrives empty inside the helper, and the
+	# helper used to answer that by committing an EMPTY clip. Every clip
+	# taken off the desktop then cleared the phone's clipboard instead of
+	# filling it. Measured, not guessed: the history recorded exactly one
+	# empty capture per delivery attempt and never the text. As an
+	# argument the bytes survive, and the set was watched working: the
+	# text reached the clipboard and the watcher captured it. Base64 has
+	# no quoting characters, so it is safe inside the quotes.
 	ensure_clip_dex >/dev/null 2>&1
-	if su 2000 -c "CLASSPATH='${TS_CLIP_DEX_RUN:-/data/local/tmp/tailbridge-clip.dex}' app_process /system/bin ${TS_CLIP_CLASS:-com.paras.tailbridge.clip.ClipBoard} set com.android.shell" \
-		> /dev/null 2>&1 <<EOF
-$_b64
-EOF
+	if su 2000 -c "CLASSPATH='${TS_CLIP_DEX_RUN:-/data/local/tmp/tailbridge-clip.dex}' app_process /system/bin ${TS_CLIP_CLASS:-com.paras.tailbridge.clip.ClipBoard} set com.android.shell '$_b64'" \
+		>/dev/null 2>&1
 	then
 		log_line "clipboard received from ${_src:-a peer}"
 	else
 		log_line "clipboard arrived but could not be set"
-		return 0
+		return 2
 	fi
 
 	# Record it, so the history on this device knows about it too.
@@ -218,7 +239,7 @@ EOF
 			--arg h "$_h" \
 			'{t:$t,c:$c,s:$s,d:1,p:0,h:$h}' 2>/dev/null)"
 	fi
-	[ -n "$_json" ] || return 0
+	[ -n "$_json" ] || return 2
 
 	_last_h=""
 	if [ -f "$_store" ]; then
@@ -240,12 +261,27 @@ EOF
 	fi
 	printf '%s\n' "$_json" >> "$_store" 2>/dev/null
 	chmod 0600 "$_store" 2>/dev/null
-	# It was a clipboard, and not a file somebody sent, so say so.
-	#
-	# The caller uses this to leave it out of the notification: a clipboard
-	# arriving is not news, and a notification for every copy would be a
-	# notification for every copy anybody makes.
-	return 1
+	return 0
+}
+
+# Clipboard payloads left in the delivery folder.
+#
+# A clipboard is not a file: it is text that was on the phone's clipboard,
+# and a copy of it sitting in Downloads is a copy of somebody's password
+# in a directory every gallery and file manager can read. The file is
+# removed as soon as it has been put on the clipboard, but a delivery that
+# arrived while the receiver was not running -- or one that could not be
+# handled at all -- leaves one behind. They are swept on every start.
+sweep_stale_clips() {
+	_dir="${TS_TAILDROP_DIR:-/sdcard/Download/Tailscale}"
+	[ -d "$_dir" ] || return 0
+	_n=0
+	for _f in "$_dir"/clip-*.clip; do
+		[ -f "$_f" ] || continue
+		rm -f "$_f" 2>/dev/null && _n=$((_n + 1))
+	done
+	[ "$_n" -gt 0 ] && log_line "swept $_n leftover clipboard file(s) from $_dir"
+	return 0
 }
 
 # A file we could not move out. Said once, not once per poll.
@@ -348,7 +384,27 @@ drain() {
 			# it is not a file somebody sent: it does not count towards the
 			# notification, and the notification does not say "1 file(s)
 			# received" for a copy.
-			if handle_clip "$out"; then
+			#
+			# The file itself is removed as well. A clipboard is text --
+			# sometimes a password -- and leaving it in the delivery
+			# folder puts it in a directory that every file manager and
+			# gallery on the device can read. An encrypted history is
+			# pointless if the same text is lying about in plain view.
+			#
+			# handle_clip's word for "this was a clipboard" is 0 -- what a
+			# command returns when it worked. The rc is captured because
+			# there are three answers: 0 (a clip: never announced), 1 (not
+			# a clip: it is a file transfer and it counts), 2 (a clip that
+			# could not be handled: kept, and still not announced -- a
+			# failed clipboard is not news of a file arriving). Starting
+			# from anything but 0 swallowed the 0: a successful clip kept
+			# the old value, was read as "not a clip", and was announced
+			# like a file. Measured after the first rewrite, which still
+			# notified for a successful clip.
+			clip_rc=0
+			handle_clip "$out" || clip_rc=$?
+			if [ "$clip_rc" -ne 1 ]; then
+				rm -f "$out" 2>/dev/null
 				fresh="${fresh}${base} ${_size}\n"
 				continue
 			fi
@@ -358,9 +414,6 @@ drain() {
 			[ -n "$first" ] || first="$out"
 			# Remember what this was, so that the same delivery found in
 			# the other directory is not exported a second time.
-			fresh="${fresh}${base} ${_size}\n"
-			# A clipboard file is also put into the clipboard and recorded.
-			handle_clip "$out"
 			fresh="${fresh}${base} ${_size}\n"
 		done
 	}
@@ -498,6 +551,11 @@ cleanup_pidfile() {
 trap cleanup_pidfile EXIT INT TERM
 
 log_line "receiver started (pid $$, destination ${DEST})"
+
+# Clear away any clipboard payload left in the delivery folder by an earlier
+# run. These are copies of what was on the phone's clipboard, in plain
+# text, in a directory the rest of the device can read.
+sweep_stale_clips
 
 # Drain whatever piled up while we were not running, before blocking.
 drain
