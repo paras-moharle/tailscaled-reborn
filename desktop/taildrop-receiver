@@ -210,14 +210,6 @@ set_clipboard() {
     return 1
 }
 
-# Say that a clipboard arrived.
-announce_clip() {
-    if command -v notify-send >/dev/null 2>&1; then
-        notify-send -a "Taildrop" -u critical \
-            "Clipboard received" "From ${1:-a peer}" >/dev/null 2>&1 || true
-    fi
-}
-
 # Returns how many files it moved, on stdout.
 announce() {
     _path="$1"
@@ -296,6 +288,22 @@ while :; do
     fi
 
     _n="$(deliver)"
+
+    # The thing file get --wait does not do, measured, not assumed.
+    #
+    # It returns spuriously -- with nothing staged, several times a
+    # minute -- and re-arms. A delivery that lands while it is between
+    # runs is not held for the next one: it is gone, and the only trace
+    # is a sender whose send "succeeded" and a receiver that never saw
+    # it. The phone's receiver needed the same sweep. So, before
+    # re-arming, whatever is pending on the daemon is collected right
+    # away. A non-wait get returns immediately; when nothing is pending
+    # it costs nothing.
+    if ! "$CLI" file get --conflict=rename "$STAGING" >>"$FETCH_LOG" 2>&1; then
+        log "sweep fetch failed; the next wait will collect what arrived"
+    fi
+    deliver >/dev/null
+
     # A file that could not be moved is still staged. Retry it on a short
     # cadence instead of leaving it until the next unrelated delivery wakes
     # the loop.
@@ -306,4 +314,10 @@ while :; do
         sleep 5
         _n="$(deliver)"
     done
+    # The blank return.
+    #
+    # The wait returns often with nothing at all; without a pause the loop
+    # burns CPU re-arming for nothing. One second keeps delivery latency
+    # where it is and keeps the loop quiet.
+    [ "$_n" -eq 0 ] && sleep 1
 done
