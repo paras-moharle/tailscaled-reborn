@@ -186,7 +186,19 @@ append_entry() {
 		# peer's name and marked as coming from a peer; the watcher then
 		# sees the clipboard change it caused and would otherwise replace
 		# that with a plainer entry.
-		_json="$("${TS_BIN_DIR}/jq" -c --argjson o "$_last" --argjson n "$_json" '
+		# -n, and no input redirection.
+		#
+		# jq reads standard input when it is not told not to, and here
+		# standard input is the clipboard event stream: the pipe the
+		# helper writes into, which stays open for as long as the helper
+		# is alive. jq would wait for an end-of-file that never comes and
+		# sit there for good -- and because this is the loop that reads
+		# the events, one stuck jq stops the whole history from being
+		# recorded. It was measured: a single repeated copy wedged the
+		# watcher for as long as the phone stayed up.
+		#
+		# -n says "the answer is in the arguments, there is no input".
+		_json="$("${TS_BIN_DIR}/jq" -c -n --argjson o "$_last" --argjson n "$_json" '
 			if ($o.d == 1) then ($n | .d = 1 | .s = $o.s) else $n end
 		' 2>/dev/null)" || _json=""
 		[ -n "$_json" ] || _json="$_keep"
@@ -374,6 +386,12 @@ if [ -s "$STORE" ]; then
 	_tmp="${STORE}.enc.$$"
 	if clip_crypto encrypt-store < "$STORE" > "$_tmp" 2>/dev/null && [ -s "$_tmp" ]; then
 		mv -f "$_tmp" "$STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+		# The replacement file was made by the shell, so it has whatever
+		# the umask says -- and on this phone that was 0666, which left
+		# the whole history readable by every app on the device. The
+		# store is meant to be root's alone, so it is put back the way
+		# it was found.
+		chmod 0600 "$STORE" 2>/dev/null
 	else
 		rm -f "$_tmp" 2>/dev/null
 	fi
