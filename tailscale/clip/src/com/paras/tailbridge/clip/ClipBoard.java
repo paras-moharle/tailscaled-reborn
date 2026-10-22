@@ -84,7 +84,7 @@ public class ClipBoard {
 			} else if ("get".equals(mode)) {
 				get();
 			} else if ("set".equals(mode)) {
-				set();
+				set(args);
 			} else {
 				System.out.println("err:unknown mode " + mode);
 				System.exit(2);
@@ -199,14 +199,31 @@ public class ClipBoard {
 	}
 
 	/** Replace the clipboard with the base64 text on stdin. */
-	private static void set() throws Exception {
-		BufferedReader in = new BufferedReader(new InputStreamReader(System.in, "UTF-8"));
-		StringBuilder b = new StringBuilder();
-		String line;
-		while ((line = in.readLine()) != null) {
-			b.append(line);
+	private static void set(String[] args) throws Exception {
+		// The payload arrives either as an argument or on stdin, and it
+		// used to arrive on stdin only. On this device stdin does not
+		// survive the app_process spawn the way it does for a native
+		// binary: a pipe or a redirect that got through to `su 2000 -c
+		// cat` arrive empty inside the helper, and the old code answered
+		// that by committing an EMPTY clip to the clipboard -- the input
+		// read as empty and the copy was destroyed rather than set. That
+		// meant every recourse, including every desktop-to-phone clip
+		// delivery, cleared the clipboard instead of filling it. Measured
+		// ground truth: successive empty captures in the history at
+		// exactly the times sets were attempted, never a real capture.
+		//
+		// An argument is passed byte-for-byte by app_process, so that is
+		// the path callers must use. Stdin still works where it works,
+		// and is kept for interactive use.
+		String b64 = args.length > 2 && !args[2].isEmpty()
+				? args[2] : readStdinUtf8();
+		if (b64 == null || b64.isEmpty()) {
+			// Refusing beats destroying: committing an empty clip used to
+			// be exactly what happened.
+			System.out.println("err:empty input");
+			System.exit(2);
 		}
-		String text = b.length() == 0 ? "" : new String(Base64.getDecoder().decode(b.toString()),
+		String text = new String(Base64.getDecoder().decode(b64),
 				StandardCharsets.UTF_8);
 
 		ClipboardManager cm = clipboardManager();
@@ -221,27 +238,48 @@ public class ClipBoard {
 		// The signature has changed over the years. The arity is the number of
 		// parameters the method takes, the clip included.
 		int arity = set.getParameterCount();
+		Object res = null;
 		switch (arity) {
 			case 2:
-				set.invoke(svc, cd, PKG);
+				res = set.invoke(svc, cd, PKG);
 				break;
 			case 3:
-				set.invoke(svc, cd, PKG, null);
+				res = set.invoke(svc, cd, PKG, null);
 				break;
 			case 4:
-				set.invoke(svc, cd, PKG, null, 0);
+				res = set.invoke(svc, cd, PKG, null, 0);
 				break;
 			case 5:
-				set.invoke(svc, cd, PKG, null, 0, 0);
+				res = set.invoke(svc, cd, PKG, null, 0, 0);
 				break;
 			case 6:
-				set.invoke(svc, cd, PKG, null, 0, 0, 0);
+				res = set.invoke(svc, cd, PKG, null, 0, 0, 0);
 				break;
 			default:
 				System.out.println("err:unsupported setPrimaryClip arity " + arity);
 				System.exit(3);
 		}
+		// setPrimaryClip answers false when the service refuses the clip --
+		// Android 10 and later admit writes only from the focused app, the
+		// default IME or the system, and the refusal is silent unless it is
+		// read. A blind "ok" would announce a clip that never existed.
+		if (res instanceof Boolean && !((Boolean) res)) {
+			System.out.println("err:set rejected by clipboard service");
+			System.exit(4);
+		}
 		System.out.println("ok");
+	}
+
+	/** Read all of stdin as UTF-8 text, blocking until EOF. */
+	private static String readStdinUtf8() throws Exception {
+		BufferedReader in = new BufferedReader(
+				new InputStreamReader(System.in, "UTF-8"));
+		StringBuilder b = new StringBuilder();
+		String line;
+		while ((line = in.readLine()) != null) {
+			b.append(line);
+		}
+		return b.length() == 0 ? null : b.toString();
 	}
 
 	// ----------------------------------------------------------------- helpers --
