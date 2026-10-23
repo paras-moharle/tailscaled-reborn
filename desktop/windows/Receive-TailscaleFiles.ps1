@@ -10,10 +10,23 @@
 
     Safe location: %LOCALAPPDATA%\TailBridge\
 
-    Can be run once, or scheduled (e.g. Task Scheduler every 5 minutes).
+    Single-shot mode (default): fetch once, process once, exit.
+    Watch mode (-Watch): loop forever, fetching every $IntervalSeconds
+    seconds (default 5) so phone→desktop clips land within about five seconds.
+
+.PARAMETER Watch
+    Keep running and re-poll for incoming transfers until stopped.
+
+.PARAMETER IntervalSeconds
+    Seconds between polls in watch mode. Default 5 — near-instant clipboard
+    delivery (~5 s latency) while keeping the `tailscale file get` process
+    spawn light enough for everyday use.
 #>
 [CmdletBinding()]
-param()
+param(
+    [switch]$Watch,
+    [int]$IntervalSeconds = 5
+)
 
 $ErrorActionPreference = 'Stop'
 $Script:TBDir     = "$env:LOCALAPPDATA\TailBridge"
@@ -68,20 +81,40 @@ function Process-ClipFile {
     }
 }
 
-try {
-    $tailscale = Find-TailscaleExe
-    if (-not $tailscale) { Write-Log 'ERROR: tailscale.exe not found.'; throw }
+function Do-OnePull {
+    param([string]$Tailscale)
 
     Push-Location $Script:Received
-    & $tailscale file get 2>&1 | Out-Null
+    & $Tailscale file get 2>&1 | Out-Null
     Pop-Location
 
     $files = Get-ChildItem -Path $Script:Received -Filter '*.clip' -File -ErrorAction SilentlyContinue
     foreach ($f in $files) {
         Process-ClipFile -ClipFile $f
     }
+}
 
-    exit 0
+try {
+    $tailscale = Find-TailscaleExe
+    if (-not $tailscale) { Write-Log 'ERROR: tailscale.exe not found.'; throw }
+
+    if ($Watch) {
+        Write-Log "Receive watcher started (poll every $IntervalSeconds s)."
+        while ($true) {
+            try {
+                Do-OnePull -Tailscale $tailscale
+            }
+            catch {
+                # A transient tailscale error must not kill the watcher.
+                Write-Log "Pull error: $($_.Exception.Message)"
+            }
+            Start-Sleep -Seconds $IntervalSeconds
+        }
+    }
+    else {
+        Do-OnePull -Tailscale $tailscale
+        exit 0
+    }
 }
 catch {
     Write-Log "FATAL: $($_.Exception.Message)"

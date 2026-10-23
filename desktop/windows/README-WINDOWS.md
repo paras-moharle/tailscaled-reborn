@@ -6,8 +6,8 @@ Everything lives in:
 %LOCALAPPDATA%\TailBridge\
 ├── Send-ToTailscalePeer.ps1     # File Explorer context menu command
 ├── Push-TailscaleClipboard.ps1  # Push Windows clipboard to a peer
-├── Receive-TailscaleFiles.ps1   # Pull incoming files; apply TBCLIP1 clips
-├── Install-TailsBridge.ps1      # Registers context menus + optional task
+├── Receive-TailscaleFiles.ps1   # Pull incoming files; apply TBCLIP1 clips (watch mode)
+├── Install-TailsBridge.ps1      # Registers context menus + receive watcher
 ├── logs\                        # send.log, push.log, receive.log
 ├── Received\                    # files pulled from peers
 └── Temp\                        # staging for outgoing .clip files
@@ -19,13 +19,14 @@ Open PowerShell as a normal user and run:
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
-& "$env:LOCALAPPDATA\TailBridge\Install-TailsBridge.ps1" -InstallReceiveTask
+& "$env:LOCALAPPDATA\TailBridge\Install-TailsBridge.ps1" -InstallReceiveWatcher
 ```
 
 What it does:
 - Creates the directories above.
 - Adds **"Send to Tailscale peer"** to the right-click menu for files and folders.
-- Registers a Scheduled Task (`TailBridge Receive Files`) that pulls incoming transfers every 5 minutes and at logon, so phone → desktop clipboard clips land on Windows automatically.
+- Registers a Scheduled Task (`TailBridge Receive Watcher`) that runs at logon and polls
+  `tailscale file get` every 5 seconds, so phone → desktop clipboard clips land within about five seconds.
 
 ## Send a file or folder
 
@@ -43,10 +44,16 @@ The current Windows clipboard text is wrapped in the `TBCLIP1` format and sent t
 
 ## Receive a clipboard from a peer
 
-With `-InstallReceiveTask` this happens automatically. To pull manually:
+With `-InstallReceiveWatcher` this happens automatically (~5 s latency). To pull manually:
 
 ```powershell
 & "$env:LOCALAPPDATA\TailBridge\Receive-TailscaleFiles.ps1"
+```
+
+To watch continuously without the task:
+
+```powershell
+& "$env:LOCALAPPDATA\TailBridge\Receive-TailscaleFiles.ps1 -Watch"
 ```
 
 Any `.clip` file beginning with `TBCLIP1` is decoded and placed on the Windows clipboard via `Set-Clipboard`; regular files are left in `Received\`.
@@ -71,4 +78,4 @@ HKEY_CLASSES_ROOT\*\shell\Send to Tailscale peer
 HKEY_CLASSES_ROOT\Directory\shell\Send to Tailscale peer
 ```
 
-Delete the `TailBridge` folder and unregister the scheduled task if you created one.
+Unregister the `TailBridge Receive Watcher` scheduled task if you created one, then delete the `TailBridge` folder.

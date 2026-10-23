@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Installs TailBridge for Windows: File Explorer context menu, logs dir,
-    and optional scheduled task that pulls incoming clipboard clips.
+    and an always-on receive watcher so phone→desktop clips land within ~5s.
 
 .DESCRIPTION
     Creates %LOCALAPPDATA%\TailBridge\ and registers "Send to Tailscale peer"
@@ -9,13 +9,15 @@
 
     Safe location: %LOCALAPPDATA%\TailBridge\
 
-.PARAMETER InstallReceiveTask
-    Register a Scheduled Task that runs Receive-TailscaleFiles.ps1 at logon
-    and every 5 minutes, so phone→desktop clipboard clips land automatically.
+.PARAMETER InstallReceiveWatcher
+    Register a Scheduled Task that runs Receive-TailscaleFiles.ps1 -Watch
+    at logon. The watcher polls tailscale every 5 seconds, so a clipboard
+    sent from your phone lands on the Windows clipboard within about five
+    seconds.
 #>
 [CmdletBinding()]
 param(
-    [switch]$InstallReceiveTask
+    [switch]$InstallReceiveWatcher
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,28 +60,29 @@ try {
     Write-Log 'Registering File Explorer context menu for folders (Directory)...'
     Set-ShellCommand -RootKey 'Directory' -MenuName 'Send to Tailscale peer' -Command $cmd
 
-    if ($InstallReceiveTask) {
-        Write-Log 'Registering receive scheduled task...'
-        $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-ExecutionPolicy Bypass -NoProfile -File `"$Script:TBDir\Receive-TailscaleFiles.ps1`""
-        $trigger1 = New-ScheduledTaskTrigger -AtLogOn
-        $trigger2 = New-ScheduledTaskTrigger -Daily -At 9am -RandomDelay 00:05:00
-        $trigger3 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration ([TimeSpan]::MaxValue)
-        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RunOnlyIfNetworkAvailable
+    if ($InstallReceiveWatcher) {
+        Write-Log 'Registering receive watcher scheduled task (2 s poll)...'
+        $receive  = "$Script:TBDir\Receive-TailscaleFiles.ps1"
+        $action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-ExecutionPolicy Bypass -NoProfile -File `"$receive`" -Watch"
+        $trigger  = New-ScheduledTaskTrigger -AtLogOn
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RunOnlyIfNetworkAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
         $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U -RunLevel Limited
-        $task = New-ScheduledTask -Action $action -Trigger $trigger1,$trigger2,$trigger3 -Principal $principal -Settings $settings
-        Register-ScheduledTask -TaskName 'TailBridge Receive Files' -InputObject $task -Force | Out-Null
-        Write-Log 'Scheduled task "TailBridge Receive Files" registered.'
+        $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings
+        Register-ScheduledTask -TaskName 'TailBridge Receive Watcher' -InputObject $task -Force | Out-Null
+        Write-Log 'Scheduled task "TailBridge Receive Watcher" registered.'
+        Write-Log "It polls for incoming files every 2 seconds — phone→desktop clips appear almost instantly."
     }
 
     Write-Log 'Install complete.'
     Write-Log ""
-    Write-Log "Scripts:        $Script\TBDir\"
+    Write-Log "Scripts:        $Script:TBDir\"
     Write-Log "Right-click any file or folder -> 'Send to Tailscale peer'."
     Write-Log "To push clipboard, run: $Script:TBDir\Push-TailscaleClipboard.ps1"
-    if ($InstallReceiveTask) {
-        Write-Log "Incoming clips are pulled automatically by the scheduled task."
+    if ($InstallReceiveWatcher) {
+        Write-Log "Incoming clips are pulled automatically by the watcher (~2 s latency)."
     } else {
         Write-Log "To pull incoming clips manually, run: $Script:TBDir\Receive-TailscaleFiles.ps1"
+        Write-Log "To watch continuously, run:   $Script:TBDir\Receive-TailscaleFiles.ps1 -Watch"
     }
 }
 catch {
