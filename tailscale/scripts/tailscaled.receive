@@ -213,24 +213,41 @@ EOF
 
 	# Record it, so the history on this device knows about it too.
 	#
-	# The watcher also sees the clipboard change this just made, and records
-	# it -- without knowing where it came from. So the entry written here
-	# replaces a matching one rather than adding a second, and it is the one
-	# that survives: it knows the text came from a peer and which peer.
+	# The watcher also sees the clipboard change this just made, and
+	# records it -- without knowing where it came from. The desk is the
+	# single writer of the history, so the recording here is one call to
+	# the desk with the direction that says a peer sent it. The desk
+	# collapses the watcher's echo of the same text into this entry, and
+	# the peer's name and flag are what survive -- which is the loop
+	# guard: without them one copy would bounce between the machines for
+	# ever.
 	#
-	# -c: one entry per line, like the watcher writes them.
+	# It used to tail the store, compare hashes, sed the file and append
+	# -- three writers of one file, racing the watcher and the API to be
+	# the last line. All of that is the desk's job now.
 	#
-	# The text is encrypted here too, with the same key and the same
-	# helper, so the whole history is ciphertext on disk and not just the
-	# part of it this device copied itself.
-	_store="${TS_CLIP_STORE:-${TS_DIR}/clipboard.jsonl}"
-	_json="$(printf '%s' "$_b64" | clip_crypto seal "${_src:-}" 1 2>/dev/null)"
-	_h=""
-	if [ -n "$_json" ]; then
-		_h="$(printf '%s' "$_json" | "${TS_BIN_DIR}/jq" -r '.h // ""' 2>/dev/null)"
-	else
-		# No keystore here. The text is written as it is, and the
-		# watcher says out loud that the history is not encrypted.
+	# But the desk cannot always do the job, and when it cannot, the
+	# peer's name and the direction it came from are exactly what must
+	# still reach the store: without them the watcher's echo of this
+	# same text looks like an ordinary copy, and the two machines will
+	# happily push the text between each other for ever. So the seal
+	# that comes back is checked, and the desk having skipped its write
+	# is the one case where the shell writes the line itself.
+	# The source goes base64, or a bare dash, for the same reason the
+	# watcher's does: a source with a space in it must arrive as one
+	# argument, not as several.
+	_s_b64="$(printf '%s' "${_src:-}" | "${TS_BIN_DIR}/jq" -Rrs '@base64' 2>/dev/null | tr -d '\n\r')"
+	[ -n "$_s_b64" ] || _s_b64="-"
+	_reply="$(printf '%s' "$_b64" | clip_crypto seal "$_s_b64" 1 2>/dev/null)"
+	case "$_reply" in
+	*'"id":"'*)
+		# The desk wrote it. Done.
+		return 0
+		;;
+	err:*|'')
+		# Not even sealed: the keystore is unreachable on this device.
+		# The text goes down as it is, plainly, and the hash is marked
+		# so the next sealing of the history can fix it.
 		_h="plain:$(printf '%s' "$_b64" | sha256sum 2>/dev/null | cut -d" " -f1)"
 		_json="$("${TS_BIN_DIR}/jq" -c -n \
 			--argjson t "$(busybox date +%s 2>/dev/null || echo 0)000" \
@@ -238,29 +255,57 @@ EOF
 			--arg s "${_src:-}" \
 			--arg h "$_h" \
 			'{t:$t,c:$c,s:$s,d:1,p:0,h:$h}' 2>/dev/null)"
-	fi
-	[ -n "$_json" ] || return 2
+		[ -n "$_json" ] || { log_line "history could not be recorded"; return 2; }
+		_clip_append_drop "$_json" "$_h"
+		chmod 0600 "${TS_CLIP_STORE:-${TS_DIR}/clipboard.jsonl}" 2>/dev/null
+		return 0
+		;;
+	*)
+		# Sealed by the one-shot helper, but not written by the desk,
+		# which is not running. The shell writes the line.
+		_clip_append_drop "$_reply" ""
+		chmod 0600 "${TS_CLIP_STORE:-${TS_DIR}/clipboard.jsonl}" 2>/dev/null
+		return 0
+		;;
+	esac
+}
 
+# _clip_append_drop <json-line|-> <known-hash>
+#
+# The receiver's single write into the history, used only while the desk
+# is down. Same text as the last line is not a second line: it replaces
+# it, keeping what the line before knew -- the peer's name and the fact
+# that the copy came from a peer.
+_clip_append_drop() {
+	_json="$1"
+	_known="$2"
+	_store="${TS_CLIP_STORE:-${TS_DIR}/clipboard.jsonl}"
+	if [ -z "$_known" ]; then
+		_known="$(printf '%s' "$_json" | "${TS_BIN_DIR}/jq" -r '.h // ""' 2>/dev/null)"
+	fi
+	[ -n "$_json" ] || { log_line "history could not be recorded"; return 2; }
 	_last_h=""
 	if [ -f "$_store" ]; then
 		_last_h="$(tail -n 1 "$_store" 2>/dev/null |
 			"${TS_BIN_DIR}/jq" -r '.h // ""' 2>/dev/null)"
 	fi
-	if [ -n "$_last_h" ] && [ "$_last_h" = "$_h" ]; then
+	mkdir -p "$TS_DIR" 2>/dev/null
+	if [ -n "$_last_h" ] && [ "$_last_h" = "$_known" ]; then
 		_tmp="${_store}.tmp.$$"
+		# The merge is jq with -n and no input: jq would otherwise read
+		# this very stream -- the same wedge the watcher was measured
+		# losing a history to.
+		_json="$("${TS_BIN_DIR}/jq" -c -n --argjson o "$(tail -n 1 "$_store" 2>/dev/null)" \
+			--argjson n "$_json" \
+			'if ($o.d == 1) then ($n | .d = 1 | .s = $o.s) else ($n | .d = 1) end' 2>/dev/null)" || true
 		if sed '$d' "$_store" > "$_tmp" 2>/dev/null; then
 			printf '%s\n' "$_json" >> "$_tmp" 2>/dev/null
 			mv -f "$_tmp" "$_store" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
-			chmod 0600 "$_store" 2>/dev/null
-		else
-			rm -f "$_tmp" 2>/dev/null
-			printf '%s\n' "$_json" >> "$_store" 2>/dev/null
-			chmod 0600 "$_store" 2>/dev/null
+			return 0
 		fi
-		return 0
+		rm -f "$_tmp" 2>/dev/null
 	fi
 	printf '%s\n' "$_json" >> "$_store" 2>/dev/null
-	chmod 0600 "$_store" 2>/dev/null
 	return 0
 }
 

@@ -14,12 +14,14 @@
 #     grant a permission and CLEARS THE USER'S CLIPBOARD. The shell uid owns
 #     the package, so nothing is cleared.
 #
-#   - The store is written by jq, not by hand. Clipboard contents are
-#     arbitrary text and hand-built JSON breaks on the first quote or
-#     newline in them.
+#   - The store is written by the desk, the one process that holds the
+#     keystore open and the only writer of the history this version has.
+#     What the watcher does here is ask it and report how the asking went;
+#     the fallback that writes the line itself runs only when the desk
+#     cannot be reached at all.
 #
-# The watcher restarts the helper if it dies, and prunes the store when it
-# grows past its limits.
+# The watcher restarts the helper if it dies. The store's limits are the
+# desk's to keep.
 DIR=$(dirname "$(realpath "$0")")
 # shellcheck source=../settings.sh
 . "$DIR"/../settings.sh
@@ -34,7 +36,6 @@ CLASS="${TS_CLIP_CLASS:-com.paras.tailbridge.clip.ClipBoard}"
 # limits, not targets: a clipboard history that grows without bound is a
 # problem that only shows up much later, on a phone that is already full.
 MAX_ENTRIES="${TS_CLIP_MAX_ENTRIES:-}"
-MAX_BYTES="${TS_CLIP_MAX_BYTES:-8388608}"
 
 # Milliseconds since the epoch. toybox's date does not always understand
 # %3N, so fall back to whole seconds.
@@ -79,8 +80,18 @@ share_clip() {
 	_b64="$1"
 	_src="$2"
 	[ -n "$_b64" ] || return 0
-	# It can be switched off, in the clipboard's own configuration.
-	[ "$(clip_conf share true)" = "true" ] || return 0
+	# It can be switched on, in the clipboard's own configuration -- and
+	# it is off by default. Copying a password and having it pushed to
+	# every machine before anybody has looked at it is the kind of
+	# default that is only ever regretted once: sharing is something the
+	# user turns on, and the setting from before this release is not
+	# upgraded silently.
+	[ "$(clip_conf share false)" = "true" ] || return 0
+	# And it can be narrowed. A list of peers in the configuration -- the
+	# names as tailscale knows them, comma separated -- turns a push to
+	# everybody into a push to those machines only. An empty list means
+	# every online peer: sharing was switched on explicitly.
+	_wanted="$(clip_conf share_peers '')"
 	# Not a copy that came from a peer: that would be two machines
 	# pushing the same thing to each other for ever.
 	from_peer && return 0
@@ -97,6 +108,22 @@ share_clip() {
 		"${TS_BIN_DIR}/jq" -r '.Peer | to_entries[] | select(.value.Online == true) | .value.DNSName' 2>/dev/null)"
 	[ -n "$_peers" ] || return 0
 	for _peer in $_peers; do
+		# The allowlist, when it lists anybody, is the whole of who may
+		# receive. A machine not on it gets nothing, however online it
+		# is. Names are compared with the trailing dots removed, because
+		# tailscale spells the very same peer with one here and without
+		# one there.
+		if [ -n "$_wanted" ]; then
+			_peer_name="$(printf '%s' "$_peer" | tr -d '.')"
+			_hit=""
+			for _one in $(printf '%s' "$_wanted" | tr ',' ' '); do
+				[ -n "$_one" ] || continue
+				case "$_peer_name" in
+				"$(printf '%s' "$_one" | tr -d '.')") _hit=1 ;;
+				esac
+			done
+			[ -n "$_hit" ] || continue
+		fi
 		# The name has to be clip-*.clip: the receiver on the other side
 		# looks for that, and anything else is an ordinary file.
 		_mk="$_dir/clip-${_now}-${_peer}.clip"
@@ -106,7 +133,10 @@ share_clip() {
 				"$("${TS_BIN_DIR}/jq" -Rn --arg s "$_src" '$s')"
 			printf '%s' "$_b64"
 		} > "$_mk" 2>/dev/null || continue
-		("${TS_BIN_DIR}/tailscale" file cp "$_mk" "${_peer}:" >/dev/null 2>&1
+		# Sixty seconds to deliver, or not at all. A peer that is half
+		# gone must not fill the background with pushes that will land
+		# nowhere, holding the tmp directory hostage.
+		(timeout 60 "${TS_BIN_DIR}/tailscale" file cp "$_mk" "${_peer}:" >/dev/null 2>&1
 		 rm -f "$_mk" 2>/dev/null) &
 	done
 	return 0
@@ -116,223 +146,112 @@ append_entry() {
 	_text="$1"
 	_src="$2"
 	_dir="${3:-0}"
+	# After a busy desk the function calls itself once, having waited; this
+	# marks the call that must not wait again.
+	_first="${4:-first}"
 
 	# The text is encrypted before it is written down, with a key that lives
 	# in the device's hardware keystore. The key never leaves the secure
 	# hardware, so what lands on disk is ciphertext: a copy of the storage is
 	# a copy of something that cannot be read, not a list of passwords.
 	#
-	# The helper writes a keyed hash of the text beside the ciphertext. That
-	# is what lets the watcher notice that the same thing has been copied
-	# again without decrypting anything -- and because the hash is keyed with
-	# the hardware key, the hash of a password cannot be attacked the way a
-	# plain hash of one can.
-	_sealed="$(printf '%s' "$_text" | clip_crypto seal "$_src" "$_dir" 2>/dev/null)"
-	_json=""
-	_h=""
-	if [ -n "$_sealed" ]; then
-		_json="$_sealed"
-		_h="$(printf '%s' "$_sealed" | "${TS_BIN_DIR}/jq" -r '.h // ""' 2>/dev/null)"
-	fi
-
-	if [ -z "$_json" ]; then
-		# The keystore is not available on this device. Say so, once, and
-		# keep working -- but the history is plain text while this lasts, and
-		# the user has to be told that rather than left to assume otherwise.
-		[ -f "${TS_RUN_DIR}/clip-crypto-warned" ] || {
-			echo "$(date +%s) [Warning]: The clipboard history cannot be encrypted on this device; it is being stored as plain text." \
-				>>"${TS_RUN_LOG_FILE}" 2>/dev/null
-			touch "${TS_RUN_DIR}/clip-crypto-warned" 2>/dev/null
-		}
-		# Without a key there is no keyed hash, so a plain one stands in.
-		# It only ever has to tell two copies of the same text apart.
-		#
-		# It is marked "plain:" so that it can be told apart from the hash
-		# of a sealed entry later, and sealed then. A sealed entry's hash is
-		# base64, which never contains a colon.
-		_h="plain:$(printf '%s' "$_text" | sha256sum 2>/dev/null | cut -d" " -f1)"
-		_json="$("${TS_BIN_DIR}/jq" -c -n \
-			--argjson t "$(now_ms)" \
-			--arg c "$_text" \
-			--arg s "$_src" \
-			--argjson d "$_dir" \
-			--arg h "$_h" \
-			'{t:$t,c:$c,s:$s,d:$d,p:0,h:$h}' 2>/dev/null)" || return 0
-	fi
-	[ -n "$_json" ] || return 0
-	_keep="$_json"
-
-
-	# The same text again is not a new entry.
+	# The writing is the desk's job now. One call asks it to seal the copy
+	# and record it, collapse it into the last line if the text repeats,
+	# and bring the history back under its limits -- which used to be three
+	# shell steps, run by three different programs against one file, each
+	# stepping on the others. The desk is the single writer; the watcher
+	# asks it and reports whether it worked.
 	#
-	# The comparison is on the keyed hash, because the text itself is
-	# encrypted on disk and cannot be read back to compare it.
-	#
-	# The clipboard service reports a single change twice -- the listener is
-	# called once for the user and once for the device -- so every copy
-	# arrives here twice. Listing everything twice is noise, and a history
-	# that cannot be trusted to show what was actually copied is worse than
-	# no history. So the last entry is replaced rather than added to, which
-	# also keeps the time of the most recent copy.
-	_last=""
-	_last_h=""
-	if [ -f "$STORE" ]; then
-		_last="$(tail -n 1 "$STORE" 2>/dev/null)"
-		_last_h="$(printf '%s' "$_last" | "${TS_BIN_DIR}/jq" -r '.h // ""' 2>/dev/null)"
-	fi
-	if [ -n "$_last_h" ] && [ "$_last_h" = "$_h" ]; then
-		# Keep what the last entry already knew if it knew more. A clip
-		# that arrived from a peer is recorded by the receiver with the
-		# peer's name and marked as coming from a peer; the watcher then
-		# sees the clipboard change it caused and would otherwise replace
-		# that with a plainer entry.
-		# -n, and no input redirection.
-		#
-		# jq reads standard input when it is not told not to, and here
-		# standard input is the clipboard event stream: the pipe the
-		# helper writes into, which stays open for as long as the helper
-		# is alive. jq would wait for an end-of-file that never comes and
-		# sit there for good -- and because this is the loop that reads
-		# the events, one stuck jq stops the whole history from being
-		# recorded. It was measured: a single repeated copy wedged the
-		# watcher for as long as the phone stayed up.
-		#
-		# -n says "the answer is in the arguments, there is no input".
-		_json="$("${TS_BIN_DIR}/jq" -c -n --argjson o "$_last" --argjson n "$_json" '
-			if ($o.d == 1) then ($n | .d = 1 | .s = $o.s) else $n end
-		' 2>/dev/null)" || _json=""
-		[ -n "$_json" ] || _json="$_keep"
-		_tmp="${STORE}.tmp.$$"
-		if sed '$d' "$STORE" > "$_tmp" 2>/dev/null; then
-			printf '%s\n' "$_json" >> "$_tmp" 2>/dev/null
-			mv -f "$_tmp" "$STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
-		# A file written by the shell gets whatever the umask says, and
-		# the store is meant to be readable by root alone.
-		chmod 0600 "$STORE" 2>/dev/null
-		else
-			rm -f "$_tmp" 2>/dev/null
-			printf '%s\n' "$_json" >> "$STORE" 2>/dev/null
-			chmod 0600 "$STORE" 2>/dev/null
-		fi
+	# The sealed entry that comes back is the store's own line for this
+	# copy. From the desk it is the v2 shape: the text and its source
+	# inside the seal, the rest bound to it as authenticated data. Anything
+	# without that shape is the one-shot helper's answer from when the
+	# desk itself was down -- sealed, but not yet written down, and so the
+	# shell writes it down below.
+	# The source has to reach the desk whole. Sources carry spaces --
+	# "this computer", app names with gaps in them -- and a command line
+	# is split on whitespace, which used to hand the desk the first word
+	# and eat the direction behind it. So the source goes as base64, or
+	# as a bare dash when there is none, which the desk reads back whole.
+	_s_b64="$(printf '%s' "${_src:-}" | "${TS_BIN_DIR}/jq" -Rrs '@base64' 2>/dev/null | tr -d '\n\r')"
+	[ -n "$_s_b64" ] || _s_b64="-"
+	_out="$(printf '%s' "$_text" | clip_crypto seal "$_s_b64" "$_dir" 2>/dev/null)"
+	case "$_out" in
+	err:*|'') : ;;
+	*'"id":"'*)
+		# The desk did the whole job. The answer is the line it wrote.
+		# Nothing for the shell to do but tell the app.
+		( am broadcast -a com.paras.tailbridge.action.CLIPBOARD_CHANGED \
+			-p com.paras.tailbridge >/dev/null 2>&1 & ) || true
 		return 0
-	fi
-
-	printf '%s\n' "$_json" >> "$STORE" 2>/dev/null
-	chmod 0600 "$STORE" 2>/dev/null
-
-	# Tell the app, if it is open.
-	#
-	# Without this the clipboard screen only learns about a copy when the
-	# app's next poll runs, which is up to five seconds later. Copying
-	# something and watching the screen not change for five seconds makes
-	# the whole thing look broken.
-	#
-	# A broadcast is the right shape for this: the app is usually not
-	# running, so there is nothing to poll, and when it is running it wants
-	# to know the moment something changes.
-	# This is a nudge, not the mechanism: the app reads the
-	# clipboard itself while it is in the foreground, so it
-	# already knows. The nudge is for the case where the app
-	# was asleep when the copy happened.
-	#
-	# It is sent in the background on purpose. `am` takes a
-	# second or two to start, and running it here would hold
-	# up the next copy behind it.
-	( am broadcast -a com.paras.tailbridge.action.CLIPBOARD_CHANGED \
-		-p com.paras.tailbridge >/dev/null 2>&1 & ) || true
-	return 0
-}
-
-# prune -- drop the oldest entries until the store is within its limits.
-prune() {
-	[ -f "$STORE" ] || return 0
-	# The limits are settings, so they are read here rather than fixed.
-	MAX_ENTRIES="$(clip_conf max 5000)"
-	case "$MAX_ENTRIES" in '' | *[!0-9]*) MAX_ENTRIES=5000 ;; esac
-	MAX_DAYS="$(clip_conf days 0)"
-	case "$MAX_DAYS" in '' | *[!0-9]*) MAX_DAYS=0 ;; esac
-	_bytes="$(wc -c < "$STORE" 2>/dev/null || echo 0)"
-	case "$_bytes" in '' | *[!0-9]*) _bytes=0 ;; esac
-	_lines="$(wc -l < "$STORE" 2>/dev/null || echo 0)"
-	case "$_lines" in '' | *[!0-9]*) _lines=0 ;; esac
-
-	# By age.
-	#
-	# A count alone does not bound a history: five thousand copies a day
-	# for a year is a lot of text, and the entries that matter are the
-	# recent ones. Zero days means keep them for ever.
-	#
-	# The store is append-only, so the oldest entry is the first line and
-	# the newest is the last. Everything below drops from the front: the
-	# oldest first, always.
-	if [ "$MAX_DAYS" -gt 0 ]; then
-		_cutoff=$(( $(now_ms) - MAX_DAYS * 86400000 ))
-		_oldest="$("${TS_BIN_DIR}/jq" -r '(.t // 0) | tostring' "$STORE" 2>/dev/null | head -1)"
-		case "$_oldest" in
-		'' | *[!0-9]*) : ;;
-		*)
-			if [ "$_oldest" -lt "$_cutoff" ]; then
+		;;
+	*)
+		# The desk itself was down; the one-shot helper sealed the copy
+		# and left the writing to whoever asked. The writing is still
+		# what the watcher has always done: append at the end -- with the
+		# one collapse into the last line that a repeated copy asks for,
+		# because the desk's dedup is what it is not being given.
+		_h="$(printf '%s' "$_out" | "${TS_BIN_DIR}/jq" -r '.h // ""' 2>/dev/null)"
+		[ -n "$_h" ] || _out=""
+		if [ -n "$_out" ]; then
+			mkdir -p "$TS_DIR" 2>/dev/null
+			_last_h=""
+			if [ -f "$STORE" ]; then
+				_last_h="$(tail -n 1 "$STORE" 2>/dev/null |
+					"${TS_BIN_DIR}/jq" -r '.h // ""' 2>/dev/null)"
+			fi
+			if [ -n "$_last_h" ] && [ "$_last_h" = "$_h" ]; then
+				# Repeated copy: replace the last line, so the
+				# clipboard service's double report does not land
+				# twice. Keep a peer identity if the line carried one.
+				_out="$("${TS_BIN_DIR}/jq" -c -n --argjson o "$(tail -n 1 "$STORE" 2>/dev/null)" \
+					--argjson n "$_out" 'if ($o.d == 1) then ($n | .d = 1 | .s = $o.s) else $n end' 2>/dev/null)" \
+					|| _out="$(tail -n 1 "$STORE" 2>/dev/null)"
 				_tmp="${STORE}.tmp.$$"
-				if "${TS_BIN_DIR}/jq" -c --argjson c "$_cutoff" 'select((.t // 0) >= $c)' \
-					"$STORE" > "$_tmp" 2>/dev/null; then
+				if sed '$d' "$STORE" > "$_tmp" 2>/dev/null; then
+					printf '%s\n' "$_out" >> "$_tmp" 2>/dev/null
 					mv -f "$_tmp" "$STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
-					_lines="$(wc -l < "$STORE" 2>/dev/null || echo 0)"
-					case "$_lines" in '' | *[!0-9]*) _lines=0 ;; esac
-					_bytes="$(wc -c < "$STORE" 2>/dev/null || echo 0)"
-					case "$_bytes" in '' | *[!0-9]*) _bytes=0 ;; esac
 				else
 					rm -f "$_tmp" 2>/dev/null
+					printf '%s\n' "$_out" >> "$STORE" 2>/dev/null
 				fi
+			else
+				printf '%s\n' "$_out" >> "$STORE" 2>/dev/null
 			fi
-			;;
-		esac
-	fi
-
-	if [ "$_lines" -le "$MAX_ENTRIES" ] && [ "$_bytes" -le "$MAX_BYTES" ]; then
-		return 0
-	fi
-
-	# The count prune.
-	#
-	# The store is append-only, so the last line is the newest and the
-	# first is the oldest: dropping from the front is first in, first out.
-	#
-	# A starred entry is never dropped. It was starred on purpose, and
-	# the person who starred it is the only one who can unstar it -- a
-	# limit that quietly removed it would be the limit overruling them.
-	_tmp="${STORE}.tmp.$$"
-	if "${TS_BIN_DIR}/jq" -c -s --argjson n "$MAX_ENTRIES" '
-			. as $all
-			| ($all | map(select((.p // 0) != 1)) | reverse | .[0:$n]) as $keep
-			| (if ($keep | length) == 0 then {} else ($keep | map({(.t | tostring): true}) | add) end) as $keepMap
-			| $all | map(select((.p // 0) == 1 or ($keepMap[(.t | tostring)] == true))) | .[]
-		' "$STORE" > "$_tmp" 2>/dev/null; then
-		mv -f "$_tmp" "$STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
-	else
-		rm -f "$_tmp" 2>/dev/null
-	fi
-
-	# Still too big after the entry cap: the entries themselves are large.
-	# Halve the file until it fits.
-	_bytes="$(wc -c < "$STORE" 2>/dev/null || echo 0)"
-	case "$_bytes" in '' | *[!0-9]*) _bytes=0 ;; esac
-	while [ "$_bytes" -gt "$MAX_BYTES" ]; do
-		_lines="$(wc -l < "$STORE" 2>/dev/null || echo 0)"
-		case "$_lines" in '' | *[!0-9]*) _lines=0 ;; esac
-		[ "$_lines" -gt 1 ] || break
-		_keep=$(( _lines / 2 ))
-		_tmp="${STORE}.tmp.$$"
-		if tail -n "$_keep" "$STORE" > "$_tmp" 2>/dev/null; then
-			mv -f "$_tmp" "$STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
 			chmod 0600 "$STORE" 2>/dev/null
-		else
-			rm -f "$_tmp" 2>/dev/null
-			break
+			( am broadcast -a com.paras.tailbridge.action.CLIPBOARD_CHANGED \
+				-p com.paras.tailbridge >/dev/null 2>&1 & ) || true
+			return 0
 		fi
-		_bytes="$(wc -c < "$STORE" 2>/dev/null || echo 0)"
-		case "$_bytes" in '' | *[!0-9]*) _bytes=0 ;; esac
-	done
-	return 0
+		;;
+	esac
+
+	#
+	# The desk did not answer. Why it did not decides what happens.
+	#
+	case "$_out" in
+	*"desk is busy"*)
+		# Every seat taken. They are let go in milliseconds, so it is
+		# worth waiting once rather than dropping a copy into the
+		# void: wait a second, and ask again through this very
+		# function, marking it as the one last try.
+		if [ "$_first" = "first" ]; then
+			sleep 1
+			append_entry "$_text" "$_src" "$_dir" again
+			return
+		fi
+		;;
+	esac
+
+	# A busy desk that stayed busy, or too large, or anything else the desk
+	# said no to: the copy is not written down at all. Writing plain text
+	# here, because the sealing path exists but said no, would be a step
+	# backwards -- the history's promise is that it is ciphertext, and a
+	# promise kept on every copy except the ones holding passwords is no
+	# promise at all. The copy is dropped, loudly.
+	echo "$(date +%s) [Warning]: clipboard desk refused a copy: ${_out:-no answer}" \
+		>>"${TS_RUN_LOG_FILE}" 2>/dev/null
+	return 1
 }
 
 mkdir -p "$TS_DIR" 2>/dev/null
@@ -345,7 +264,8 @@ chmod 0600 "$STORE" 2>/dev/null
 	printf 'max=5000\n' >> "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
 	printf 'days=0\n' >> "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
 	printf 'ignore=\n' >> "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
-	printf 'days=0\n' >> "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
+	printf 'share=false\n' >> "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
+	printf 'share_peers=\n' >> "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
 	chmod 0600 "${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}" 2>/dev/null
 }
 
@@ -375,27 +295,13 @@ if [ -f "$_lock" ]; then
 fi
 printf '%s\n' "$_mine" > "$_lock" 2>/dev/null
 
-# Encrypt a store that was written before there was any encryption, so the
-# old entries do not sit there in plain text for ever.
-#
-# It runs every time the watcher starts, not just the first time. Sealing
-# something that is already sealed leaves it exactly as it is, so this is
-# safe to repeat, and doing it again catches anything that was written in
-# the clear in between -- by an older version of the watcher, say.
-if [ -s "$STORE" ]; then
-	_tmp="${STORE}.enc.$$"
-	if clip_crypto encrypt-store < "$STORE" > "$_tmp" 2>/dev/null && [ -s "$_tmp" ]; then
-		mv -f "$_tmp" "$STORE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
-		# The replacement file was made by the shell, so it has whatever
-		# the umask says -- and on this phone that was 0666, which left
-		# the whole history readable by every app on the device. The
-		# store is meant to be root's alone, so it is put back the way
-		# it was found.
-		chmod 0600 "$STORE" 2>/dev/null
-	else
-		rm -f "$_tmp" 2>/dev/null
-	fi
-fi
+# A store that was written before there was any encryption is the desk's
+# problem now, not the shell's. The desk migrates the whole file to the v2
+# shape once, when it starts, with the single-writer lock held; a shell
+# rewrite here would race that and, worse, would leave the desk's index of
+# byte offsets pointing at a file it no longer describes. The old watcher
+# did exactly that on every start, and only the desk's short runs kept it
+# harmless.
 
 _count=0
 while true; do

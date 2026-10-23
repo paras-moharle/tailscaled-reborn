@@ -734,7 +734,20 @@ clip_store_tail() {
 }
 
 # Bring the store within its limits now.
+#
+# The desk holds the limits too, and it is the one writer of the store, so
+# it is asked first and the jq pass below is only for when the desk cannot
+# be reached. Asking it first also lets the desk enforce limits the shell
+# never knew about -- the size cap, in particular, which the shell's pass
+# has no answer for.
 clip_prune() {
+	_out="$(clip_crypto prune 2>/dev/null)"
+	case "$_out" in
+	err:*|'') : ;;
+	*) printf '%s\n' "$_out"; return 0 ;;
+	esac
+	# The desk is down. The old pass, over the file the shell can still
+	# follow along -- the entry cap only; the desk keeps the rest.
 	_max="$(clip_conf max 5000)"
 	case "$_max" in '' | *[!0-9]*) _max=5000 ;; esac
 	[ -f "$CLIP_STORE" ] || return 0
@@ -769,6 +782,21 @@ clip_mark() {
 	_t="${1:-}"
 	_p="${2:-1}"
 	[ -n "$_t" ] || err "clipboard: star needs a timestamp"
+	# The desk first: one line rewriting one entry, with the seal and the
+	# authentication redone so the star cannot be faked on disk. It takes
+	# the entry's id; the timestamp is accepted as well, for callers that
+	# have not moved over.
+	_mode=star
+	[ "$_p" = "0" ] && _mode=unstar
+	_out="$(clip_crypto "$_mode" "$_t" 2>/dev/null)"
+	case "$_out" in
+	err:*|'') : ;;
+	*) printf '%s\n' "$_out"; return 0 ;;
+	esac
+	# The desk is down. The jq pass rewrites the file the old way -- as
+	# root, over the whole store, unsealing nothing -- which worked for
+	# the plain star and still works while the file is not being
+	# rewritten anywhere else.
 	[ -f "$CLIP_STORE" ] || { printf '{"ok":true}\n'; return 0; }
 	_tmp="${CLIP_STORE}.tmp.$$"
 	if "$JQ" -c --argjson t "$_t" --argjson p "$_p" \
@@ -788,6 +816,11 @@ clip_mark() {
 clip_delete() {
 	_t="${1:-}"
 	[ -n "$_t" ] || err "clipboard: delete needs a timestamp"
+	_out="$(clip_crypto delete "$_t" 2>/dev/null)"
+	case "$_out" in
+	err:*|'') : ;;
+	*) printf '%s\n' "$_out"; return 0 ;;
+	esac
 	[ -f "$CLIP_STORE" ] || { printf '{"ok":true}\n'; return 0; }
 	_tmp="${CLIP_STORE}.tmp.$$"
 	if "$JQ" -c --argjson t "$_t" 'select((.t // 0) != $t)' \
@@ -819,10 +852,17 @@ api_clipboard() {
 		# -c: one entry per line. Pretty-printed, the same data is three
 		# times the size and the app has to parse all of it.
 		#
-		# Only the entries that are asked for are opened. The hardware
-		# takes a few milliseconds for each one.
-		clip_store_tail "$_n" | "$JQ" -c -s --argjson n "$_n" 'reverse | .[0:$n] | .[]' \
-			2>/dev/null || echo "[]"
+		# The desk answers this from its index: the newest n entries, one
+		# line each, the text already opened for the entries asked for.
+		# The whole tail-fallback below is for when the desk is down.
+		_out="$(clip_crypto list "$_n" 2>/dev/null)"
+		case "$_out" in
+		'' | err:*)
+			clip_store_tail "$_n" | "$JQ" -c -s --argjson n "$_n" 'reverse | .[0:$n] | .[]' \
+				2>/dev/null || echo "[]"
+			;;
+		*) printf '%s\n' "$_out" ;;
+		esac
 		;;
 	search)
 		_q="${1:-}"
@@ -830,11 +870,18 @@ api_clipboard() {
 		# The text is base64 in the store, so it has to be decoded before it
 		# can be matched. jq does that.
 		#
-		# The store is decrypted first: the text on disk is ciphertext, and
-		# there is nothing to match against until it is readable again.
-		clip_store_plain | "$JQ" -s --arg q "$_q" '
-			[ .[] | select((.c | @base64d) | contains($q)) ] | reverse
-		' 2>/dev/null || echo "[]"
+		# The desk searches its own list -- the query goes over the wire
+		# and the answer comes back already matched. The pass over the
+		# decrypted store is for when the desk is down.
+		_out="$(printf '%s' "$_q" | clip_crypto search 2>/dev/null)"
+		case "$_out" in
+		'' | err:*)
+			clip_store_plain | "$JQ" -s --arg q "$_q" '
+				[ .[] | select((.c | @base64d) | contains($q)) ] | reverse
+			' 2>/dev/null || echo "[]"
+			;;
+		*) printf '%s\n' "$_out" ;;
+		esac
 		echo
 		;;
 	get)
@@ -868,15 +915,24 @@ EOF
 		clip_send "$_peer"
 		;;
 	clear)
-		: > "$CLIP_STORE" 2>/dev/null || true
+		# Through the desk: it is the single writer, and its index has to
+		# hear about it. Truncating behind its back is what happens only
+		# when the desk cannot be reached.
+		_out="$(clip_crypto clear 2>/dev/null)"
+		case "$_out" in
+		'' | err:*) : > "$CLIP_STORE" 2>/dev/null || true ;;
+		*) printf '%s\n' "$_out" ;;
+		esac
 		printf '{"ok":true}\n'
 		;;
 	config)
 		# What the watcher is doing, as opposed to what it has done.
-		printf '{"ok":true,"watch":%s,"max":%s,"days":%s}\n' \
+		printf '{"ok":true,"watch":%s,"max":%s,"days":%s,"share":%s,"share_peers":%s}\n' \
 			"$("$JQ" -Rn --arg v "$(clip_conf watch true)" '$v')" \
 			"$("$JQ" -Rn --arg v "$(clip_conf max 5000)" '$v')" \
-			"$("$JQ" -Rn --arg v "$(clip_conf days 0)" '$v')"
+			"$("$JQ" -Rn --arg v "$(clip_conf days 0)" '$v')" \
+			"$("$JQ" -Rn --arg v "$(clip_conf share false)" '$v')" \
+			"$("$JQ" -Rn --arg v "$(clip_conf share_peers '')" '$v')"
 		;;
 	set)
 		_key="${1:-}"
@@ -903,6 +959,24 @@ EOF
 			esac
 			[ "$_val" -le 3650 ] || err "clipboard: days must be at most 3650"
 			;;
+		share)
+			# Sharing copies with peers. Off by default, and it stays
+			# off until something turns it on.
+			case "$_val" in
+			true | false) ;;
+			*) err "clipboard: share expects true or false, got '$_val'" ;;
+			esac
+			;;
+		share_peers)
+			# Which peers a copy may be pushed to, comma separated. An
+			# empty value means every online peer, which sharing
+			# already promises to be.
+			case "$_val" in
+			*\'* | *\"* | *\;* | *\&* | *\|* | *\$*)
+				err "clipboard: share_peers looks like a shell line, not a peer list"
+				;;
+			esac
+			;;
 		*) err "clipboard: unknown setting $_key" ;;
 		esac
 		clip_conf_set "$_key" "$_val"
@@ -928,12 +1002,24 @@ EOF
 		# This is the list the settings show, so the user can tell a
 		# password manager to keep its copies to itself without having to
 		# know the package name.
-		"$JQ" -s '
-			[ .[] | select((.s // "") != "") ]
-			| group_by(.s)
-			| map({ source: .[0].s, count: length })
-			| sort_by(-.count)
-		' "$CLIP_STORE" 2>/dev/null || echo "[]"
+		#
+		# In the v2 store the source is inside the seal with the text, so
+		# the desk -- which opens entries anyway -- is who counts it. The
+		# pass over the raw store below is only for when the desk is
+		# down, and then only helps for the old v1 lines, where the
+		# source was readable on disk.
+		_out="$(clip_crypto apps 2>/dev/null)"
+		case "$_out" in
+		'' | err:*)
+			"$JQ" -s '
+				[ .[] | select((.s // "") != "") ]
+				| group_by(.s)
+				| map({ source: .[0].s, count: length })
+				| sort_by(-.count)
+			' "$CLIP_STORE" 2>/dev/null || echo "[]"
+			;;
+		*) printf '%s\n' "$_out" ;;
+		esac
 		echo
 		;;
 	*)
