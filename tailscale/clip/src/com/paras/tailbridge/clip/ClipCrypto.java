@@ -63,9 +63,7 @@ public class ClipCrypto {
 	private static final String ALIAS = "tailbridge-clipboard-v1";
 
 	/** The name the hashing key is stored under. */
-	private static final String MAC_ALIAS = "tailbridge-clipboard-hmac-v1";
-
-	/** The transformation. AES in Galois/Counter mode: authenticated, so a
+	private static final String MAC_ALIAS = "tailbridge-clipboard-hmac-v1";	/** The transformation. AES in Galois/Counter mode: authenticated, so a
 	 *  file that has been tampered with is refused rather than decrypted
 	 *  into nonsense. */
 	private static final String TRANSFORM = "AES/GCM/NoPadding";
@@ -91,13 +89,24 @@ public class ClipCrypto {
 	 * <p>The key is the ciphertext, which is different for every entry and
 	 * does not change when the entry is starred or moved.
 	 */
-	private static final Map<String, byte[]> OPENED =
+	static final Map<String, byte[]> OPENED =
 			Collections.synchronizedMap(new LinkedHashMap<String, byte[]>(256, 0.75f, true) {
 				@Override
 				protected boolean removeEldestEntry(Map.Entry<String, byte[]> eldest) {
 					return size() > 6000;
 				}
 			});
+
+	/**
+	 * A v1 entry opened. The history written by releases before v2 had the
+	 * whole text sealed on its own, with no AAD and the hash beside it.
+	 * Only the migration to v2 reads these, so the routine is here and not
+	 * advertised anywhere else.
+	 */
+	static byte[] openV1(String sealedB64) throws Exception {
+		byte[] in = Base64.getDecoder().decode(sealedB64);
+		return open(key(), in);
+	}
 
 	/** The authentication tag, which GCM appends to the ciphertext. */
 	private static final int TAG_BITS = 128;
@@ -109,8 +118,14 @@ public class ClipCrypto {
 				probe();
 				System.out.println("ok");
 			} else if ("seal".equals(mode)) {
-				System.out.println(sealEntry(readAll().trim(),
-						args.length > 1 ? args[1] : "",
+				// Same convention as the desk: the source arrives base64
+				// encoded, or as a bare dash when there is none, so that
+				// a source with a space in it does not come out as two
+				// arguments.
+				String src = args.length > 1 ? args[1] : "-";
+				src = "-".equals(src) ? "" : new String(
+						Base64.getDecoder().decode(src), "UTF-8");
+				System.out.println(sealEntry(readAll().trim(), src,
 						args.length > 2 ? args[2] : "0"));
 			} else if ("encrypt".equals(mode)) {
 				byte[] plain = Base64.getDecoder().decode(readAll());
@@ -191,19 +206,34 @@ public class ClipCrypto {
 				CRYPTO_PROVIDER, 2);
 	}
 
-	/** Adds one of them, if it is not there already. */
+	/** Adds one of them, if it is not there already.
+	 *
+	 *  <p>Under a lock, because the desk answers several conversations
+	 *  at once and the first keystroke of each reaches the keystore at
+	 *  roughly the same time. Two threads asking together would both see
+	 *  the provider missing, and the one that looked up its cipher while
+	 *  the other was still installing got a NoSuchProviderException out
+	 *  of an operation that had worked the moment before.
+	 */
+	private static final Object PROVIDER_LOCK = new Object();
+
 	private static void addProvider(String name, String providerName, int position) throws Exception {
-		try {
-			if (Security.getProvider(providerName) != null) {
-				return;
+		synchronized (PROVIDER_LOCK) {
+			try {
+				if (Security.getProvider(providerName) != null) {
+					return;
+				}
+			} catch (Throwable ignored) {
+				// Fall through and try to add it.
 			}
-		} catch (Throwable ignored) {
-			// Fall through and try to add it.
+			Class<?> p = Class.forName(name);
+			java.lang.reflect.Constructor<?> ctor = p.getDeclaredConstructor();
+			ctor.setAccessible(true);
+			Security.insertProviderAt((java.security.Provider) ctor.newInstance(), position);
+			if (Security.getProvider(providerName) == null) {
+				throw new IllegalStateException("provider " + providerName + " did not register");
+			}
 		}
-		Class<?> p = Class.forName(name);
-		java.lang.reflect.Constructor<?> ctor = p.getDeclaredConstructor();
-		ctor.setAccessible(true);
-		Security.insertProviderAt((java.security.Provider) ctor.newInstance(), position);
 	}
 
 	/**
@@ -323,19 +353,8 @@ public class ClipCrypto {
 		return c.doFinal(body);
 	}
 
-	/**
-	 * The whole store, in one pass.
-	 *
-	 * <p>Reads JSON lines on stdin, works on the "c" field of each, and
-	 * writes the lines back out. Encrypting or decrypting five thousand
-	 * entries one helper process at a time would take minutes; doing it
-	 * here is one process and one pass.
-	 *
-	 * <p>An entry that will not decrypt is left exactly as it is. That is
-	 * what lets a store written before there was any encryption be read: the
-	 * old entries are still plain text, and the watcher encrypts them when
-	 * it next starts.
-	 */
+	// ------------------------------------------------- whole-store I/O ----
+
 	/** The whole store, sealed. */
 	static String encryptStore(String text) throws Exception {
 		return store(key(), macKey(), true, text);
@@ -349,10 +368,10 @@ public class ClipCrypto {
 	/**
 	 * The whole store, in one pass.
 	 *
-	 * <p>Reads JSON lines, works on the "c" field of each, and writes the
-	 * lines back out. Encrypting or decrypting five thousand entries one
-	 * helper process at a time would take minutes; doing it here is one
-	 * pass.
+	 * <p>Reads JSON lines on stdin, works on the "c" field of each, and
+	 * writes the lines back out. Encrypting or decrypting five thousand
+	 * entries one helper process at a time would take minutes; doing it
+	 * here is one pass.
 	 *
 	 * <p>An entry that will not decrypt is left exactly as it is. That is
 	 * what lets a store written before there was any encryption be read: the
@@ -374,6 +393,64 @@ public class ClipCrypto {
 				org.json.JSONObject o = new org.json.JSONObject(line);
 				String c = o.optString("c", "");
 				if (!c.isEmpty()) {
+					if (o.optInt("v", 1) >= 2) {
+						// A v2 line: the sealed blob carries the text and
+						// its source; time, direction, starred and the
+						// hash are bound to it as AAD. When the fields are
+						// edited, the blob refuses to open -- that is the
+						// point of the binding.
+						if (encrypt) {
+							if (o.optString("h", "").isEmpty()) {
+								// The line was handed over readable --
+								// "c" is base64 text. Seal it back to a
+								// blob with the same identity, so a
+								// re-encrypt of a store the desk handed
+								// out does not invent new entries with
+								// new ids.
+								String id = o.optString("id", "");
+								if (id.isEmpty()) {
+									id = ClipHistory.newId(o.optLong("t",
+											System.currentTimeMillis()));
+								}
+								String text2 = new String(
+										Base64.getDecoder().decode(c), "UTF-8");
+								org.json.JSONObject inner = new org.json.JSONObject();
+								inner.put("text", text2);
+								inner.put("s", o.optString("s", ""));
+								String hash = historyHash(text2);
+								String aad = ClipHistory.aad(id,
+										o.optLong("t", System.currentTimeMillis()),
+										o.optInt("d", 0), o.optInt("p", 0), hash);
+								o.put("c", sealBlob(inner.toString(), aad));
+								o.put("h", hash);
+								o.put("id", id);
+								o.put("v", 2);
+							}
+						} else {
+							// Open it. A wrong hash or an edited field
+							// breaks the AAD and the whole entry is
+							// refused -- and a refused entry written
+							// through would keep the store unre-openable,
+							// so it is dropped with a marker instead.
+							try {
+								String hash = o.optString("h", "");
+								String aad = ClipHistory.aad(o.optString("id", ""),
+										o.optLong("t", 0), o.optInt("d", 0),
+										o.optInt("p", 0), hash);
+								org.json.JSONObject inner = new org.json.JSONObject(
+										openBlob(c, aad));
+								o.put("c", Base64.getEncoder().encodeToString(
+										inner.optString("text", "").getBytes("UTF-8")));
+								o.put("s", inner.optString("s", ""));
+							} catch (Throwable refused) {
+								o.put("unreadable", true);
+							}
+							o.remove("h");
+							o.put("v", 2);
+						}
+						out.append(o.toString()).append('\n');
+						continue;
+					}
 					byte[] raw = Base64.getDecoder().decode(c);
 					if (encrypt) {
 						// An entry that is already sealed is left exactly as
@@ -416,6 +493,57 @@ public class ClipCrypto {
 			}
 		}
 		return out.toString();
+	}
+	// ----------------------------------------------------------- v2 blobs --
+	//
+	// A v2 entry keeps two things honest at once. The text and its source
+	// are inside the seal, where nobody can read or alter them without the
+	// key. The metadata -- the time, the direction, whether it is starred --
+	// travels as AAD: authenticated data. Anyone who edits it in place
+	// breaks the seal and the entry is refused rather than shown, which is
+	// what stops a rewritten timestamp or a swapped ciphertext from
+	// surfacing as a false memory in the history.
+
+	/**
+	 * One v2 blob: the plain JSON in, sealed with AAD, and the keyed hash
+	 * of the seal beside it. The hash is what dedup compares, so the same
+	 * text is noticed again without opening the hardware for every
+	 * keystroke.
+	 */
+	static String sealBlob(String plainJson, String aad) throws Exception {
+		SecretKey key = key();
+		Cipher c = Cipher.getInstance(TRANSFORM, CRYPTO_PROVIDER);
+		c.init(Cipher.ENCRYPT_MODE, key);
+		byte[] iv = c.getIV();
+		c.updateAAD(aad.getBytes("UTF-8"));
+		byte[] body = c.doFinal(plainJson.getBytes("UTF-8"));
+		byte[] out = new byte[iv.length + body.length];
+		System.arraycopy(iv, 0, out, 0, iv.length);
+		System.arraycopy(body, 0, out, iv.length, body.length);
+		return Base64.getEncoder().encodeToString(out);
+	}
+
+	/** The inverse of sealBlob. */
+	static String openBlob(String sealedB64, String aad) throws Exception {
+		byte[] in = Base64.getDecoder().decode(sealedB64);
+		if (in.length <= IV_BYTES) {
+			throw new IllegalArgumentException("ciphertext is too short");
+		}
+		byte[] iv = new byte[IV_BYTES];
+		System.arraycopy(in, 0, iv, 0, IV_BYTES);
+		byte[] body = new byte[in.length - IV_BYTES];
+		System.arraycopy(in, IV_BYTES, body, 0, body.length);
+		Cipher c = Cipher.getInstance(TRANSFORM, CRYPTO_PROVIDER);
+		c.init(Cipher.DECRYPT_MODE, key(), new GCMParameterSpec(TAG_BITS, iv));
+		c.updateAAD(aad.getBytes("UTF-8"));
+		return new String(c.doFinal(body), "UTF-8");
+	}
+
+	/** The keyed hash of a sealed blob. Two equal texts seal to blobs that
+	 *  hash differently (the nonce differs), so dedup compares the hash
+	 *  made over the plain text instead -- see historyHash. */
+	static String historyHash(String plainText) throws Exception {
+		return Base64.getEncoder().encodeToString(mac(macKey(), plainText.getBytes("UTF-8")));
 	}
 
 	/** Everything on stdin, with the trailing newline removed. */
