@@ -200,8 +200,9 @@ built from source with `javac` and `d8`, and it is not a separate dependency.
   it. ART refuses to load a dex file the caller could modify, and it does so
   by aborting with no message at all.
 
-The history lives in the module, not in the app. It is a plain text file,
-not a database — see below for where it is and what that means.
+The history lives in the module, not in the app. It is one JSON line per
+copy — not a database, not plain text — see below for where it is and what
+that means.
 
 ### Where the history is kept, and what that means
 

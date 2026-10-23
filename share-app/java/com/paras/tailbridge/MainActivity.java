@@ -914,6 +914,36 @@ public class MainActivity extends Activity {
 	 * <p>Shown once per launch. A rotation or a backgrounded resume must not
 	 * re-open a dialog over something the user is already doing.
 	 */
+	/**
+	 * The share sheet's two-line title: the command, then the cargo.
+	 *
+	 * <p>Built by hand rather than as one string, because the two lines
+	 * want different weight: the command is the decision being asked
+	 * for, the count is the detail under it. A single line lost the
+	 * count, and a count in the title read like part of the command.
+	 */
+	private android.view.View sheetTitle() {
+		android.widget.LinearLayout block = new android.widget.LinearLayout(this);
+		block.setOrientation(android.widget.LinearLayout.VERTICAL);
+		block.setPadding(dp(24), dp(20), dp(24), dp(4));
+
+		android.widget.TextView t = new android.widget.TextView(this);
+		t.setText(getString(R.string.choose_devices));
+		t.setTextColor(getColor(R.color.text));
+		t.setTextSize(19);
+		t.setTypeface(null, android.graphics.Typeface.BOLD);
+		block.addView(t);
+
+		android.widget.TextView sub = new android.widget.TextView(this);
+		sub.setText(getString(R.string.share_n_files, pendingUris.size()));
+		sub.setTextColor(getColor(R.color.text2));
+		sub.setTextSize(12.5f);
+		sub.setPadding(0, dp(4), 0, 0);
+		block.addView(sub);
+
+		return block;
+	}
+
 	private void maybeShowSharePicker() {
 		if (!shareLaunch || pickerShown || pendingUris.isEmpty()) {
 			return;
@@ -970,47 +1000,130 @@ public class MainActivity extends Activity {
 				return enabled[i];
 			}
 
+			/**
+			 * One device: a letter on a coloured coin, its name and its
+			 * state in words, and the switch that takes it.
+			 *
+			 * <p>The coin is drawn, not an asset: the first letter of the
+			 * machine's name on a disc tinted by state means the eye can
+			 * pick a device from a list of six without reading one line.
+			 * The switch's thumb follows, tinted the accent when the
+			 * machine is coming along and the plain grey when it is not,
+			 * so the list reads top to bottom the way the Send button
+			 * reads: what is coming, what is not.
+			 */
 			@Override
 			public android.view.View getView(int i, android.view.View convert,
 					android.view.ViewGroup parent) {
-				android.view.View v = convert;
-				if (v == null) {
-					v = toggle(false);
-					android.widget.Switch cb = (android.widget.Switch) v;
-					cb.setTextColor(getColor(enabled[i] ? R.color.text : R.color.hint));
-					cb.setTextSize(16);
-					cb.setPadding(dp(22), dp(14), dp(22), dp(14));
-					cb.setOnClickListener(x -> {
-						if (!enabled[i]) {
-							return;
-						}
-						cb.setChecked(!cb.isChecked());
-						picked[i] = cb.isChecked();
-						if (sendRef[0] != null) {
-							boolean any = false;
-							for (int k = 0; k < picked.length; k++) {
-								if (picked[k] && enabled[k]) {
-									any = true;
-									break;
-								}
+				Api.Peer p = ps.get(i);
+				final boolean on = enabled[i];
+
+				android.widget.LinearLayout row = new android.widget.LinearLayout(MainActivity.this);
+				row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+				row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+				row.setPadding(dp(18), dp(11), dp(14), dp(11));
+				row.setBackground(getDrawable(R.drawable.row_press));
+
+				// The coin. Tinted for an online machine, hollow for a
+				// sleeping one; the letter rides on top either way.
+				final int coin = dp(38);
+				android.widget.TextView av = new android.widget.TextView(MainActivity.this);
+				String nm = p.name == null || p.name.isEmpty() ? "?" : p.name;
+				av.setText(nm.substring(0, 1).toUpperCase());
+				av.setGravity(android.view.Gravity.CENTER);
+				av.setTextSize(16);
+				av.setTypeface(null, android.graphics.Typeface.BOLD);
+				av.setTextColor(getColor(on ? R.color.accentHi : R.color.hint));
+				android.graphics.drawable.GradientDrawable disc =
+						new android.graphics.drawable.GradientDrawable();
+				disc.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+				disc.setColor(getColor(on ? R.color.accentDim : R.color.hairline));
+				av.setBackground(disc);
+				row.addView(av, new android.widget.LinearLayout.LayoutParams(coin, coin));
+
+				// Name and state. The name carries the weight; the state
+				// is a whisper under it, so a list of five machines is
+				// read by its names and checked by its states.
+				android.widget.LinearLayout col = new android.widget.LinearLayout(MainActivity.this);
+				col.setOrientation(android.widget.LinearLayout.VERTICAL);
+
+				android.widget.TextView name = new android.widget.TextView(MainActivity.this);
+				name.setText(p.name);
+				name.setTextColor(getColor(on ? R.color.text : R.color.hint));
+				name.setTextSize(15.5f);
+				name.setTypeface(null, android.graphics.Typeface.BOLD);
+				name.setMaxLines(1);
+				name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+				col.addView(name);
+
+				android.widget.TextView sub = new android.widget.TextView(MainActivity.this);
+				sub.setText(on
+						? getString(R.string.peer_online).toLowerCase()
+						: getString(R.string.peer_offline_label));
+				sub.setTextColor(getColor(on ? R.color.ok : R.color.hint));
+				sub.setTextSize(11.5f);
+				sub.setPadding(0, dp(2), 0, 0);
+				col.addView(sub);
+
+				android.widget.LinearLayout.LayoutParams colp =
+						new android.widget.LinearLayout.LayoutParams(0,
+								android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+				colp.setMargins(dp(14), 0, dp(10), 0);
+				row.addView(col, colp);
+
+				// The switch, tinted with the state it reports. A stock
+				// thumb is a grey coin that cannot be told from off; the
+				// accent is what is being conferred on the machine here.
+				final android.widget.Switch cb = toggle(false);
+				cb.setText(null);
+				cb.setBackground(null);
+				java.util.function.BiConsumer<android.widget.Switch, Boolean> paint
+						= (s, checkedNow) -> s.setThumbTintList(
+								android.content.res.ColorStateList.valueOf(getColor(
+										checkedNow ? R.color.accent : R.color.thumbOff)));
+				android.content.res.ColorStateList tint =
+						android.content.res.ColorStateList.valueOf(getColor(
+								(picked[i] && on) ? R.color.accent : R.color.thumbOff));
+				cb.setThumbTintList(tint);
+				cb.setEnabled(on);
+				cb.setAlpha(on ? 1f : 0.45f);
+				cb.setChecked(picked[i] && on);
+				cb.setOnClickListener(x -> {
+					if (!on) {
+						return;
+					}
+					cb.setChecked(!cb.isChecked());
+					picked[i] = cb.isChecked();
+					paint.accept(cb, cb.isChecked());
+					if (sendRef[0] != null) {
+						boolean any = false;
+						for (int k = 0; k < picked.length; k++) {
+							if (picked[k] && enabled[k]) {
+								any = true;
+								break;
 							}
-							sendRef[0].setTextColor(getColor(
-									any ? R.color.accent : R.color.hint));
 						}
-					});
-					v = cb;
-				}
-				android.widget.Switch cb = (android.widget.Switch) v;
-				cb.setEnabled(enabled[i]);
-				cb.setAlpha(enabled[i] ? 1f : 0.45f);
-				cb.setText(labels[i]);
-				cb.setChecked(picked[i] && enabled[i]);
-				return v;
+						sendRef[0].setTextColor(getColor(
+								any ? R.color.accent : R.color.hint));
+					}
+				});
+				row.setOnClickListener(v -> cb.callOnClick());
+				row.addView(cb);
+
+				// Reuse is nothing here: a dozen machines at the very
+				// most, and the rows are built fresh every time the
+				// dialog opens.
+				return row;
 			}
 		};
 
-		android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
-				.setTitle(getString(R.string.choose_devices))
+		android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(
+				this, R.style.Theme_Share_Dialog)
+				// The title block carries the count of what is being
+				// shared, above the list: two lines, the command and the
+				// cargo, so the user knows which share this is before the
+				// devices are chosen.
+				.setCustomTitle(sheetTitle())
 				// The listener is required by the API, but a null one would
 				// dismiss the dialog on the first row tap. No-op keeps it open
 				// so more than one device can be chosen, which is the point of
@@ -1047,6 +1160,10 @@ public class MainActivity extends Activity {
 		android.view.Window win = dlg.getWindow();
 		if (win != null) {
 			win.setBackgroundDrawableResource(R.drawable.dialog_bg);
+			// Deep enough that the page behind reads as "gone" and the
+			// sheet is the only lit thing on the screen: a share target
+			// is a decision, not a browse.
+			win.setDimAmount(0.62f);
 		}
 
 		// Material upper-cases its buttons; the rest of the app is sentence
@@ -1068,7 +1185,12 @@ public class MainActivity extends Activity {
 		for (android.widget.Button b : new android.widget.Button[]{pos, neg}) {
 			if (b != null) {
 				b.setAllCaps(false);
-				b.setTextColor(getColor(R.color.accent));
+				// The two buttons do not weigh the same: Send is the
+				// action this sheet exists for, Cancel is the way out.
+				// Same voice, different weight, so the eye lands right.
+				if (b != pos) {
+					b.setTextColor(getColor(R.color.text2));
+				}
 				b.setTextSize(15);
 			}
 		}
@@ -2423,9 +2545,22 @@ public class MainActivity extends Activity {
 	/** One entry of the history: show it, and offer to send or copy it. */
 	private void showClipEntry(ClipEntry e) {
 		String body = clipText(e);
+		// A source label like "com.paras.tailbridge" is honest but not
+		// friendly; show the label an installed package goes by, or the
+		// plain words for the special sources.
+		String who;
+		if (e.fromPeer) {
+			who = getString(R.string.clip_from_peer);
+		} else if ("com.android.shell".equals(e.source)) {
+			who = getString(R.string.clip_by_module);
+		} else if (e.source.isEmpty()) {
+			who = getString(R.string.clip_no_source);
+		} else {
+			who = appLabel(e.source);
+		}
 		android.app.AlertDialog.Builder b =
 				new android.app.AlertDialog.Builder(this, R.style.Theme_Share_Dialog)
-						.setTitle(e.source.isEmpty() ? getString(R.string.clip_heading) : e.source)
+						.setTitle(who.isEmpty() ? getString(R.string.clip_heading) : who)
 						.setMessage(body.isEmpty() ? getString(R.string.clip_now_empty) : body)
 						.setPositiveButton(android.R.string.ok, null);
 		b.show();
@@ -2812,7 +2947,7 @@ public class MainActivity extends Activity {
 				+ (up ? "  ·  " + link : "")
 				+ (p.exitNode ? "  ·  " + getString(R.string.exit_node_suffix) : "")
 				+ (p.exitNodeOption && !p.exitNode
-					? "  ·  " + getString(R.string.exit_node_suffix) : "")
+					? "  ·  " + getString(R.string.exit_node_offer) : "")
 				+ (up ? "" : "  ·  " + getString(R.string.peer_offline_label)
 					+ (when.isEmpty() ? "" : "  ·  " + when)));
 		meta.setTextColor(getColor(R.color.text2));
@@ -3024,51 +3159,68 @@ public class MainActivity extends Activity {
 		}
 		toast(getString(R.string.sending));
 		new Thread(() -> {
-			java.io.File dir = new java.io.File(getCacheDir(), "send");
-			List<java.io.File> files = new ArrayList<>();
-			int failed = 0;
-			for (Uri u : uris) {
-				try {
-					files.add(Stage.copy(this, u, dir));
-				} catch (Exception e) {
-					// Could not even read the file. Without this the run would
-					// report "sent 0" as a success.
-					failed++;
-					Log.w(TAG, "could not stage " + u + ": " + e);
-				}
-			}
-			int ok = 0;
-			StringBuilder problems = new StringBuilder();
-			for (String peer : targets) {
-				for (java.io.File f : files) {
+			try {
+				java.io.File dir = new java.io.File(getCacheDir(), "send");
+				List<java.io.File> files = new ArrayList<>();
+				int failed = 0;
+				for (Uri u : uris) {
 					try {
-						Api.send(peer, f.getAbsolutePath());
-						ok++;
-					} catch (Root.Denied e) {
-						throw e;
+						files.add(Stage.copy(this, u, dir));
 					} catch (Exception e) {
+						// Could not even read the file. Without this the run would
+						// report "sent 0" as a success.
 						failed++;
-						if (problems.length() < 300) {
-							problems.append(peer).append(": ").append(e.getMessage()).append('\n');
+						Log.w(TAG, "could not stage " + u + ": " + e);
+					}
+				}
+				int ok = 0;
+				StringBuilder problems = new StringBuilder();
+				for (String peer : targets) {
+					for (java.io.File f : files) {
+						try {
+							Api.send(peer, f.getAbsolutePath());
+							ok++;
+						} catch (Root.Denied e) {
+							// Root was refused part way through a run. It is not
+							// a crash, but a lost file; the report below says
+							// so, and the user has the permission screen for
+							// the next attempt. Throwing it out of a bare
+							// thread used to kill the whole app -- after the
+							// share sheet had closed, mid-send, silently.
+							failed++;
+							problems.append(peer).append(": ")
+									.append(getString(R.string.need_root_short)).append('\n');
+						} catch (Exception e) {
+							failed++;
+							if (problems.length() < 300) {
+								problems.append(peer).append(": ").append(e.getMessage()).append('\n');
+							}
 						}
 					}
 				}
+				final int fOk = ok, fFailed = failed;
+				final String p = problems.toString().trim();
+				ui.post(() -> {
+					if (fFailed == 0) {
+						toast(getString(R.string.sent_ok, fOk, targets.size()));
+					} else {
+						alert()
+								.setTitle(R.string.send_failed)
+								.setMessage(getString(R.string.sent_partial, fOk, fFailed) + "\n\n" + p)
+								.setPositiveButton(android.R.string.ok, null)
+								.show();
+					}
+					// Re-read so the staged-items note clears once it is sent.
+					refresh();
+				});
+			} catch (Throwable t) {
+				// One worker for a whole share. Whatever it throws, the app
+				// stays alive to report it; an uncaught throw up here would
+				// take the process down, and with it the share the user was
+				// still waiting on.
+				Log.w(TAG, "send run failed", t);
+				ui.post(() -> toast(String.valueOf(t.getMessage())));
 			}
-			final int fOk = ok, fFailed = failed;
-			final String p = problems.toString().trim();
-			ui.post(() -> {
-				if (fFailed == 0) {
-					toast(getString(R.string.sent_ok, fOk, targets.size()));
-				} else {
-					alert()
-							.setTitle(R.string.send_failed)
-							.setMessage(getString(R.string.sent_partial, fOk, fFailed) + "\n\n" + p)
-							.setPositiveButton(android.R.string.ok, null)
-							.show();
-				}
-				// Re-read so the staged-items note clears once it is sent.
-				refresh();
-			});
 		}).start();
 	}
 

@@ -137,7 +137,55 @@ public class FilesProvider extends ContentProvider {
 		if (!f.isFile()) {
 			throw new FileNotFoundException(f.getName());
 		}
-		return ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY);
+		try {
+			return ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY);
+		} catch (FileNotFoundException refused) {
+			// The file is there, but this app may not touch it directly.
+			// Received files are staged by the module as root, and the FUSE
+			// view can show them owned by another uid with a group the app
+			// is not in; the direct open is then refused while the file
+			// itself is perfect. The app has root; a pipe from `cat` serves
+			// the bytes without turning the provider into a browser.
+			return throughRoot(f);
+		}
+	}
+
+	/**
+	 * One file, streamed through root, into a pipe.
+	 *
+	 * <p>A new process rather than the shared shell: `cat` of a binary
+	 * would flood Root's line protocol, and a transfer must not be
+	 * seated behind the fifteen-second status poll on the single shell.
+	 * Once the bytes are gone the process is destroyed and the pipe is
+	 * closed by the other end's reader.
+	 */
+	private ParcelFileDescriptor throughRoot(File f) throws FileNotFoundException {
+		try {
+			ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+			final ParcelFileDescriptor writeEnd = pipe[1];
+			final Process p = Runtime.getRuntime().exec(
+					new String[] { "/system/bin/su", "-c",
+							"cat '" + f.getCanonicalPath().replace("'", "'\\''") + "' 2>/dev/null" });
+			new Thread(() -> {
+				try (java.io.InputStream src = p.getInputStream();
+						java.io.OutputStream dst =
+								new ParcelFileDescriptor.AutoCloseOutputStream(writeEnd)) {
+					byte[] buf = new byte[8192];
+					int n;
+					while ((n = src.read(buf)) >= 0) {
+						dst.write(buf, 0, n);
+					}
+				} catch (Throwable ignored) {
+					// The reader hung up, or the file vanished. Either way
+					// the descriptor is closing itself now.
+				} finally {
+					p.destroy();
+				}
+			}, "tailbridge-serve").start();
+			return pipe[0];
+		} catch (Exception e) {
+			throw new FileNotFoundException("cannot open " + f.getName() + ": " + e);
+		}
 	}
 
 	@Override

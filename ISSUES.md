@@ -268,6 +268,9 @@ The app was read through and used on the phone. What it found:
   forwards traffic fine, but the masquerading that normally hides the
   phone's address behind it is a netfilter thing. Whether an exit node on
   this phone works, and what the other side sees, has not been measured.
+  The peer list now tells the two states apart: "exit node" when traffic
+  is routed through one, "exit node on offer" when one is merely
+  advertised.
 - **The updater can lose a race at boot.** It waits eight times, twenty
   seconds apart, and gives up. On a phone that takes longer than that to
   get onto the network, the feed is unreachable and the message says so

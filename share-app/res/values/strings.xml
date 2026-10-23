@@ -68,6 +68,7 @@
 	<string name="send_to_n">Send to %1$d devices</string>
 	<string name="send">Send</string>
 	<string name="exit_node_suffix">exit node</string>
+<string name="exit_node_offer">exit node on offer</string>
 	<string name="choose_devices">Send to</string>
 	<string name="pick_a_device">Pick a device first</string>
 	<string name="nothing_picked">No file was selected</string>
@@ -189,6 +190,7 @@
 	<string name="peer_offline">Offline</string>
 	<string name="peer_offline_label">offline</string>
 	<string name="peer_offline_toast">That device is offline. It cannot receive files right now.</string>
+	<string name="share_n_files">%1$d file(s) waiting</string>
 	<string name="state_no_internet">No internet</string>
 	<string name="state_daemon_stopped">Stopped</string>
 	<string name="taildrop_open_with">Open with</string>
