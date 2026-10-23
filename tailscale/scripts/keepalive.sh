@@ -90,33 +90,45 @@ while true; do
 		continue
 	fi
 
-	# Deliberately stopped by the user. Say so, rather than letting the
-	# manager keep claiming the daemon is running.
+	# Whether the user wants the daemon up. A stopped daemon is not a
+	# stopped module: the clipboard -- recording what is copied, whatever
+	# the network is doing -- is module work, and it used to lose its
+	# supervision the moment the daemon was off, because the check for
+	# the daemon's state exited the cycle before the clipboard was ever
+	# looked at. The daemon is one thing this cycle looks after; the
+	# clipboard and the receiver are the others, and they are looked
+	# after in every cycle the module is enabled.
+	_want_daemon=1
 	if [ "$(wanted_state)" != "running" ]; then
-		ts_module_status stopped
-		continue
+		_want_daemon=0
 	fi
 
 	if ! daemon_running; then
 		# Say so before trying to fix it. The root manager shows this state in
 		# its module list, and a line that still said "running" while the
 		# daemon was gone is worse than no line at all.
-		ts_module_status stopped
-		log_keepalive "Warning" "tailscaled was not running; starting it again."
-		"${TS_SCRIPTS_DIR}/tailscaled.service" start >>"${TS_RUN_LOG_FILE}" 2>&1
-		sleep 5
-		# Say plainly whether it came back. A restart that silently fails is
-		# the same invisible failure this whole script exists to prevent.
-		if daemon_running; then
-			ts_module_status running
-			log_keepalive "Info" "tailscaled is running again."
-			# Tell the app, if it is open: the daemon came back without
-			# anybody asking it to, and the screen should say so.
-			am broadcast -a com.paras.tailbridge.action.STATE_CHANGED \
-				-p com.paras.tailbridge >/dev/null 2>&1 || true
-		else
+		if [ "$_want_daemon" != "1" ]; then
+			# Stopped on purpose. Saying so rather than starting the
+			# thing the user just asked to stop is the entire difference
+			# between supervision and nagging.
 			ts_module_status stopped
-			log_keepalive "Error" "tailscaled did not come back up."
+		else
+			log_keepalive "Warning" "tailscaled was not running; starting it again."
+			"${TS_SCRIPTS_DIR}/tailscaled.service" start >>"${TS_RUN_LOG_FILE}" 2>&1
+			sleep 5
+			# Say plainly whether it came back. A restart that silently fails is
+			# the same invisible failure this whole script exists to prevent.
+			if daemon_running; then
+				ts_module_status running
+				log_keepalive "Info" "tailscaled is running again."
+				# Tell the app, if it is open: the daemon came back without
+				# anybody asking it to, and the screen should say so.
+				am broadcast -a com.paras.tailbridge.action.STATE_CHANGED \
+					-p com.paras.tailbridge >/dev/null 2>&1 || true
+			else
+				ts_module_status stopped
+				log_keepalive "Error" "tailscaled did not come back up."
+			fi
 		fi
 	else
 		ts_module_status running

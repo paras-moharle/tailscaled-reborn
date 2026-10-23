@@ -7,6 +7,15 @@
 # command below is therefore written to survive its own failure.
 set -e
 
+# Files this module writes are root's alone until something proves
+# otherwise. Every file created after this line inherits this PERMISSION:
+# 077 removes group and other, so a log, a store, a token file or a
+# temporary clip lands at 0600 and nothing readable-but-rootless can open
+# it. The old install ran at the caller's umask, which was 0666/0722
+# depending on who sourced us, which is how a clipboard store readable by
+# every app on the phone happened in the first place.
+umask 077
+
 # Custom settings
 
 # Set tailscale directory variables

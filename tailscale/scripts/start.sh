@@ -98,6 +98,35 @@ module_version=$(busybox awk -F'=' '!/^ *#/ && /version=/ { print $2 }' "$TS_MOD
 [ -n "$module_version" ] || module_version="unknown"
 log Info "Tailscaled Reborn version : ${module_version}."
 
+# The scratch directory. Clips waiting to be pushed carry copies of
+# whatever was on the clipboard -- once that includes a password -- so the
+# directory holds them at root alone, and 0700 for the directory itself so
+# nobody can even list what is in it.
+mkdir -p "${TS_DIR}/tmp" 2>/dev/null || true
+chmod 0700 "${TS_DIR}/tmp" 2>/dev/null || true
+
+# Logs grow without asking. The daemon's log went past a few megabytes on
+# chatty days, and it is joined by the runs log, which the supervisor
+# writes to every 30 seconds for as long as the phone is up. Both are cut
+# here, once per boot: the last few thousand lines are kept, the rest is
+# gone. It is not elegant, but it bounds a file that would otherwise grow
+# for as long as the phone lives.
+rotate_log() {
+  _path="$1"
+  _keep_lines="$2"
+  _max_bytes="$3"
+  [ -s "$_path" ] || return 0
+  _bytes=$(wc -c < "$_path" 2>/dev/null || echo 0)
+  case "$_bytes" in
+    ''|*[!0-9]*) return 0 ;;
+  esac
+  [ "$_bytes" -le "$_max_bytes" ] && return 0
+  tail -n "$_keep_lines" "$_path" > "$_path.tmp" 2>/dev/null && \
+    mv -f "$_path.tmp" "$_path" 2>/dev/null
+}
+rotate_log "${TS_RUN_DIR}/tailscaled.log" 2000 5242880
+rotate_log "${TS_RUN_LOG_FILE}" 2000 2097152
+
 # Each step is independent. A failure in one must not stop the others: the
 # receiver is what collects arriving files, and the supervisor is what
 # notices a dead daemon, so both matter even if the daemon itself refuses
