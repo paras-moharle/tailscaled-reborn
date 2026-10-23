@@ -447,14 +447,76 @@ public class MainActivity extends Activity {
 	 * module's history is asked for as well so the entry is still there
 	 * after the app is closed.
 	 */
+	private void showLiveClipInstantly() {
+		try {
+			android.content.ClipboardManager cm =
+					getSystemService(android.content.ClipboardManager.class);
+			android.content.ClipData cd = cm.getPrimaryClip();
+			if (cd == null || cd.getItemCount() == 0) {
+				return;
+			}
+			CharSequence cs = cd.getItemAt(0).getText();
+			if (cs == null || cs.length() == 0) {
+				return;
+			}
+			final String text = cs.toString();
+			ui.post(() -> {
+				// The same text at the top already is the same copy --
+				// the module wrote it down a moment ago and the history
+				// may have answered in between. Two rows of one copy is
+				// worse than the wait the fast path exists to spare.
+				if (!clipEntries.isEmpty() && text.equals(clipEntries.get(0).text)) {
+					return;
+				}
+				ClipEntry e = new ClipEntry();
+				e.time = System.currentTimeMillis();
+				e.text = text;
+				// The source is not know the way a store entry's is, and
+				// saying nothing is better than saying a wrong name; the
+				// store's answer carries the real one.
+				e.source = "";
+				clipEntries.add(0, e);
+				refreshClipList();
+			});
+		} catch (Exception ignored) {
+			// The read was refused, or there was nothing to read. The
+			// store's answer is the slow path, and it is still coming.
+		}
+	}
 
-
-
+	/** The system's own list of who is watching the clipboard.
+	 *
+	 *  <p>This is what makes a copy instant. The module hears about a
+	 *  copy, writes it down, and then has to start `am` to broadcast the
+	 *  news -- that whole chain is hundreds of milliseconds. The system
+	 *  tells this listener the moment the copy happens, before any of
+	 *  that, and the app is in the foreground with permission to read
+	 *  the clipboard, so it can show the copy straight away.
+	 */
+	private android.content.ClipboardManager.OnPrimaryClipChangedListener
+			clipSystemListener;
 
 	/** Listen for the module saying the clipboard changed. */
 	private void registerClipboardListener() {
 		if (clipReceiver != null) {
+			// Registered already; the system listener follows the same
+			// one-per-lifetime rule.
 			return;
+		}
+		// The fastest of the three paths, registered first. A copy is
+		// shown from the system clipboard alone; the module's news
+		// arrives after and the history it records agrees with what is
+		// already on the screen.
+		try {
+			android.content.ClipboardManager cm =
+					getSystemService(android.content.ClipboardManager.class);
+			if (clipSystemListener == null) {
+				clipSystemListener = () -> showLiveClipInstantly();
+			}
+			cm.addPrimaryClipChangedListener(clipSystemListener);
+		} catch (Exception ignored) {
+			// Without it the module's broadcast is still a fast path in
+			// its own right.
 		}
 		clipReceiver = new android.content.BroadcastReceiver() {
 			@Override
@@ -495,6 +557,16 @@ public class MainActivity extends Activity {
 	protected void onPause() {
 		super.onPause();
 		stopPolling();
+		if (clipSystemListener != null) {
+			try {
+				android.content.ClipboardManager cm =
+						getSystemService(android.content.ClipboardManager.class);
+				cm.removePrimaryClipChangedListener(clipSystemListener);
+			} catch (Exception ignored) {
+				// Already gone.
+			}
+			clipSystemListener = null;
+		}
 		if (clipReceiver != null) {
 			try {
 				unregisterReceiver(clipReceiver);
@@ -1740,6 +1812,11 @@ public class MainActivity extends Activity {
 
 	/** One history entry, as the module recorded it. */
 	private static final class ClipEntry {
+		/** The store's own handle for this entry. Everything the user can
+		 *  do to one entry -- star it, delete it -- is done by id, because
+		 *  a timestamp is reused when a repeated copy collapses into the
+		 *  line it replaced. */
+		String id = "";
 		long time;
 		/** The text, decoded once when the entry is read. */
 		String text = "";
@@ -1761,6 +1838,7 @@ public class MainActivity extends Activity {
 				continue;
 			}
 			ClipEntry e = new ClipEntry();
+			e.id = o.optString("id", "");
 			e.time = o.optLong("t", 0);
 			e.text = decode(o.optString("c", ""));
 			e.source = o.optString("s", "");
@@ -1933,7 +2011,7 @@ public class MainActivity extends Activity {
 	private void toggleStar(ClipEntry e, ImageView star) {
 		new Thread(() -> {
 			try {
-				Api.clipboardStar(e.time, !e.starred);
+				Api.clipboardStar(e.id, e.time, !e.starred);
 				ui.post(() -> {
 					toast(getString(R.string.done));
 					refreshClipboardList();
@@ -1977,7 +2055,7 @@ public class MainActivity extends Activity {
 				.setPositiveButton(R.string.clip_delete, (d, w) -> {
 					new Thread(() -> {
 						try {
-							Api.clipboardDelete(e.time);
+							Api.clipboardDelete(e.id, e.time);
 							ui.post(() -> {
 								toast(getString(R.string.done));
 								refreshClipboardList();
@@ -2033,6 +2111,12 @@ public class MainActivity extends Activity {
 	 * had plainly been recorded looked like it had not been.
 	 */
 	private void refreshClipboardList() {
+		// What the system has in hand, right now, at the top of the list.
+		// The module's answer is still asked for below; a su round trip to
+		// it costs hundreds of milliseconds on a good moment and seconds
+		// on a bad one, and a copy in front of somebody who is waiting is
+		// not something to make them wait for.
+		showLiveClipInstantly();
 		new Thread(() -> {
 			try {
 				final JSONArray arr = Api.clipboardList();

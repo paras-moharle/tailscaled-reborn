@@ -297,14 +297,28 @@ final class Api {
 		call("clipboard", "clear");
 	}
 
-	/** Star an entry, so a limit never quietly removes it. */
-	static void clipboardStar(long timestamp, boolean star) throws Exception {
-		call(60_000, "clipboard", star ? "star" : "unstar", String.valueOf(timestamp));
+	/** Star an entry, so a limit never quietly removes it.
+	 *
+	 *  <p>Every entry carries an id -- the store's own handle for the line
+	 *  it wrote. Older modules know nothing about it and answered to the
+	 *  timestamp instead, so both are carried and the id is used when it
+	 *  is there. A timestamp alone is a worse handle: the store reuses it
+	 *  when a repeated copy collapses into the line below it, which is
+	 *  what made stars quietly move to the wrong entry.
+	 */
+	static void clipboardStar(String entryId, long timestamp, boolean star) throws Exception {
+		String handle = (entryId != null && !entryId.isEmpty())
+				? entryId : String.valueOf(timestamp);
+		call(60_000, "clipboard", star ? "star" : "unstar", handle);
 	}
 
-	/** Remove one entry. */
-	static void clipboardDelete(long timestamp) throws Exception {
-		call(60_000, "clipboard", "delete", String.valueOf(timestamp));
+	/** Remove one entry. The same handle rule as star: id when there is
+	 *  one, timestamp when the module is older than the one talking to
+	 *  it. */
+	static void clipboardDelete(String entryId, long timestamp) throws Exception {
+		String handle = (entryId != null && !entryId.isEmpty())
+				? entryId : String.valueOf(timestamp);
+		call(60_000, "clipboard", "delete", handle);
 	}
 
 	/** What the watcher is doing: watch, max, ignore. */
