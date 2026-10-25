@@ -119,13 +119,20 @@ public class MainActivity extends Activity {
 	/** The list of entries, and the heading that counts them. */
 	private LinearLayout clipList;
 	private TextView clipListHeading;
+	/** What the list says when it has stopped loading more. */
+	private TextView clipFooter;
 
 	/** package name -> the app's own name, so "com.android.chrome" reads as
 	 *  "Chrome". Resolved once and kept: the label does not change. */
-	private final Map<String, String> appLabels = new HashMap<>();
-	/** package name -> the app's icon, for the same reason. */
+	private final Map<String, String> appLabels =
+			new java.util.concurrent.ConcurrentHashMap<>();
+	/** package name -> the app's icon, for the same reason.
+	 *  A concurrent map cannot hold a null, so packages with no icon are
+	 *  remembered here instead of being asked about again. */
 	private final Map<String, android.graphics.drawable.Drawable> appIcons =
-			new HashMap<>();
+			new java.util.concurrent.ConcurrentHashMap<>();
+	private final java.util.Set<String> noIcon =
+			java.util.concurrent.ConcurrentHashMap.newKeySet();
 
 	/** The name an installed package goes by, or the package itself. */
 	private String appLabel(String pkg) {
@@ -157,8 +164,12 @@ public class MainActivity extends Activity {
 		if (pkg == null || pkg.isEmpty()) {
 			return null;
 		}
-		if (appIcons.containsKey(pkg)) {
-			return appIcons.get(pkg);
+		android.graphics.drawable.Drawable cachedIcon = appIcons.get(pkg);
+		if (cachedIcon != null) {
+			return cachedIcon;
+		}
+		if (noIcon.contains(pkg)) {
+			return null;
 		}
 		android.graphics.drawable.Drawable d = null;
 		try {
@@ -166,7 +177,11 @@ public class MainActivity extends Activity {
 		} catch (Exception ignored) {
 			d = null;
 		}
-		appIcons.put(pkg, d);
+		if (d != null) {
+			appIcons.put(pkg, d);
+		} else {
+			noIcon.add(pkg);
+		}
 		return d;
 	}
 
@@ -219,6 +234,24 @@ public class MainActivity extends Activity {
 		pSettings = findViewById(R.id.pSettings);
 		pSystem = findViewById(R.id.pSystem);
 		pClip = findViewById(R.id.pClip);
+		{
+			// Near the end of the list, fetch the next page. The page is
+			// what makes the tab open instantly against any history size:
+			// the newest screenful is drawn, and older entries arrive only
+			// if somebody actually scrolls to them.
+			android.widget.ScrollView cs =
+					findViewById(R.id.scrollClip);
+			cs.setOnScrollChangeListener((v, x, y, ox, oy) -> {
+				if (currentTab != 3) {
+					return;
+				}
+				View child = cs.getChildAt(0);
+				if (child != null
+						&& y + cs.getHeight() >= child.getHeight() - dp(700)) {
+					loadMoreClips();
+				}
+			});
+		}
 
 		navs[0] = findViewById(R.id.navSend);
 		navs[1] = findViewById(R.id.navSettings);
@@ -461,6 +494,9 @@ public class MainActivity extends Activity {
 			}
 			final String text = cs.toString();
 			ui.post(() -> {
+				if (clipSearching) {
+					return;
+				}
 				// The same text at the top already is the same copy --
 				// the module wrote it down a moment ago and the history
 				// may have answered in between. Two rows of one copy is
@@ -621,6 +657,9 @@ public class MainActivity extends Activity {
 
 	private void tab(int n) {
 		currentTab = n;
+		if (n == 3) {
+			ensureClipLoaded();
+		}
 		ScrollView[] scrolls = {
 				findViewById(R.id.scrollSend),
 				findViewById(R.id.scrollSettings),
@@ -661,6 +700,39 @@ public class MainActivity extends Activity {
 	/** Every dialog goes through here so they all share the app's surface. */
 	private AlertDialog.Builder alert() {
 		return new AlertDialog.Builder(this, R.style.Theme_Share_Dialog);
+	}
+
+	/** Style every dialog's buttons the same way: the primary action in
+	 *  accent so it is the thing the eye lands on, Cancel de-emphasised in
+	 *  grey so it never competes, and sentence case throughout. Called
+	 *  after the dialog is shown so the buttons exist to style. */
+	private void styleDialog(android.app.AlertDialog d) {
+		android.widget.Button pos = d.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
+		if (pos != null) {
+			pos.setTextColor(getColor(R.color.accent));
+			pos.setAllCaps(false);
+			pos.setTextSize(14.5f);
+			android.graphics.Typeface tf = android.graphics.Typeface.create(
+					android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+			pos.setTypeface(tf);
+			pos.setPadding(dp(16), dp(8), dp(16), dp(8));
+		}
+		android.widget.Button neg = d.getButton(android.app.AlertDialog.BUTTON_NEGATIVE);
+		if (neg != null) {
+			neg.setTextColor(getColor(R.color.hint));
+			neg.setAllCaps(false);
+			neg.setTextSize(14.5f);
+			neg.setTypeface(android.graphics.Typeface.DEFAULT);
+			neg.setPadding(dp(16), dp(8), dp(16), dp(8));
+		}
+		android.widget.Button neu = d.getButton(android.app.AlertDialog.BUTTON_NEUTRAL);
+		if (neu != null) {
+			neu.setTextColor(getColor(R.color.hint));
+			neu.setAllCaps(false);
+			neu.setTextSize(14.5f);
+			neu.setTypeface(android.graphics.Typeface.DEFAULT);
+			neu.setPadding(dp(16), dp(8), dp(16), dp(8));
+		}
 	}
 
 	// ----------------------------------------------------------------- data
@@ -1554,13 +1626,6 @@ public class MainActivity extends Activity {
 							status = fSt;
 							rebuildVisible();
 						}
-						// The clipboard list changes on its own: a copy
-						// happens without the daemon or the app doing
-						// anything. It has to be fetched, not inferred
-						// from the daemon's status.
-						if (currentTab == 3) {
-							refreshClipboardList();
-						}
 					}
 				});
 			}).start();
@@ -1617,7 +1682,7 @@ public class MainActivity extends Activity {
 			case 3:
 				// Only the list. The search box above it must survive, and
 				// the focus must stay where the user put it.
-				loadClipboard();
+				refreshClipboardList();
 				break;
 			default:
 				break;
@@ -1690,7 +1755,13 @@ public class MainActivity extends Activity {
 		buildSend(ps);
 		buildSettings(st);
 		buildSystem(st);
-		loadClipboard();
+		// The history is not fetched here. It is the most expensive read the
+		// app makes, and the Send tab was paying for it on every launch and
+		// every refresh just because the Clip tab might be opened later. It
+		// loads when that tab is actually opened.
+		if (currentTab == 3) {
+			ensureClipLoaded();
+		}
 	}
 
 	// ------------------------------------------------------------ clipboard
@@ -1922,14 +1993,259 @@ public class MainActivity extends Activity {
 	 * everything that has been copied, and it changes on its own.
 	 */
 	private void loadClipboard() {
-		new Thread(() -> {
-			try {
-				final JSONArray entries = Api.clipboardList();
-				ui.post(() -> renderClipboard(entries));
-			} catch (Exception e) {
-				ui.post(() -> renderClipboard(null));
+		synchronized (clipFetchLock) {
+			if (clipFetching) {
+				// Somebody already asked. A second su round trip would only
+				// queue behind the first on the single root shell and make
+				// both slower; remember that the answer must be refreshed
+				// once more and let the one in flight land.
+				clipFetchAgain = true;
+				return;
 			}
-		}).start();
+			clipFetching = true;
+		}
+		new Thread(this::fetchClipboard).start();
+	}
+
+	/**
+	 * One fetch, with a retry.
+	 *
+	 * <p>The first call after the app starts can race the root shell coming
+	 * up, and the module can be busy launching. A single failure used to put
+	 * "the clipboard could not be read" on screen until the user left the
+	 * tab, which made a half-second hiccup look like a broken app.
+	 */
+	private void fetchClipboard() {
+		final String query = clipQuery;
+		final boolean search = !query.isEmpty();
+		final int gen;
+		synchronized (clipFetchLock) {
+			gen = ++clipSearchGen;
+		}
+		JSONArray entries = null;
+		int total = 0;
+		Exception failure = null;
+		for (int attempt = 0; attempt < 3 && entries == null; attempt++) {
+			if (attempt > 0) {
+				try {
+					Thread.sleep(250L * attempt);
+				} catch (InterruptedException ignored) {
+					Thread.currentThread().interrupt();
+					break;
+				}
+			}
+			try {
+				if (search) {
+					entries = Api.clipboardSearch(query);
+				} else {
+					Api.ClipPage page = Api.clipboardPage(CLIP_PAGE, 0);
+					entries = page.entries;
+					total = page.total;
+				}
+			} catch (Exception e) {
+				failure = e;
+			}
+		}
+		synchronized (clipFetchLock) {
+			if (search && gen != clipSearchGen) {
+				// A newer query is already in flight; this answer is stale.
+				clipFetching = false;
+				clipFetchAgain = false;
+				return;
+			}
+		}
+
+		if (entries != null) {
+			// Resolve names and icons here, off the UI thread. The first
+			// render used to spend a few hundred milliseconds asking the
+			// package manager what each source was, in the middle of
+			// building the list.
+			try {
+				for (int i = 0; i < entries.length(); i++) {
+					JSONObject o = entries.optJSONObject(i);
+					if (o == null) {
+						continue;
+					}
+					String s = o.optString("s", "");
+					if (!s.isEmpty()) {
+						appLabel(s);
+						appIcon(s);
+					}
+				}
+			} catch (Exception ignored) {
+				// A missing icon is cosmetic; the list still draws.
+			}
+			if (!search) {
+				saveClipCache(entries, total);
+			}
+			final JSONArray ok = entries;
+			final boolean fSearch = search;
+			final int fTotal = total;
+			ui.post(() -> clipFetchFinished(ok, null, fSearch, fTotal));
+		} else {
+			final Exception f = failure;
+			ui.post(() -> clipFetchFinished(null, f, search, 0));
+		}
+	}
+
+	/** The single place a fetch ends, so the in-flight flag is never stuck. */
+	private void clipFetchFinished(JSONArray entries, Exception failure, boolean search, int total) {
+		boolean again;
+		synchronized (clipFetchLock) {
+			clipFetching = false;
+			again = clipFetchAgain;
+			clipFetchAgain = false;
+		}
+		if (entries != null) {
+			clipFetchedAt = System.currentTimeMillis();
+			clipSearching = search;
+			List<ClipEntry> fresh = clipsFrom(entries);
+			if (search) {
+				// A search can match a great many entries; the point is
+				// finding one, not scrolling the matches.
+				if (fresh.size() > 200) {
+					fresh = new ArrayList<>(fresh.subList(0, 200));
+				}
+				clipHasMore = false;
+				clipTotal = fresh.size();
+			} else {
+				clipTotal = Math.max(total, fresh.size());
+				clipHasMore = clipLoadedTotal(fresh) < clipTotal;
+			}
+			clipEntries = fresh;
+			clipLoaded = fresh.size();
+			if (clipBuilt) {
+				refreshClipList();
+			} else {
+				renderClipboard(entries);
+			}
+		} else if (!clipBuilt) {
+			// Nothing to keep on screen. Say so once, and let the retry in
+			// the next poll try again rather than replacing a good list.
+			renderClipboard(null);
+		}
+		if (again) {
+			loadClipboard();
+		}
+	}
+
+	/**
+	 * Open the Clip tab.
+	 *
+	 * <p>The saved list is painted first, synchronously, so the tab has rows
+	 * in it the frame it appears. The fresh answer follows in the background.
+	 * Before this, the tab was blank until a root round trip and a few
+	 * hundred rows of view construction had finished.
+	 */
+	private void ensureClipLoaded() {
+		if (pClip == null) {
+			return;
+		}
+		if (clipBuilt) {
+			// Opening the tab again is a good moment to refresh, but not if
+			// the list was just fetched, and not when more than one page is
+			// loaded: that refresh returns page one and would discard the
+			// pages somebody scrolled to.
+			if (clipLoaded <= CLIP_PAGE
+					&& System.currentTimeMillis() - clipFetchedAt > 5000) {
+				loadClipboard();
+			}
+			return;
+		}
+		long t0 = android.os.SystemClock.uptimeMillis();
+		JSONArray cached = readClipCache();
+		if (cached != null) {
+			renderClipboard(cached);
+			android.util.Log.d("TailBridge", "PERF paint cached " + cached.length()
+					+ " in " + (android.os.SystemClock.uptimeMillis() - t0) + "ms");
+		} else {
+			renderClipboardLoading();
+			android.util.Log.d("TailBridge", "PERF no cache, placeholder in "
+					+ (android.os.SystemClock.uptimeMillis() - t0) + "ms");
+		}
+		loadClipboard();
+	}
+
+	/** The panel's frame, before there is a list to put in it. */
+	private void renderClipboardLoading() {
+		if (pClip == null) {
+			return;
+		}
+		pClip.removeAllViews();
+		LinearLayout g = group(pClip, null);
+		g.setPadding(dp(2), dp(2), dp(2), 0);
+		searchField(g, new ArrayList<>());
+		note(pClip, getString(R.string.loading));
+	}
+
+	/** The last list that was fetched, on disk.
+	 *
+	 *  <p>So a cold start has something to draw before the daemon answers,
+	 *  and so the history does not blink empty every time the app is
+	 *  reopened. It is a cache of a list the module owns; if it is stale the
+	 *  fresh answer replaces it a moment later.
+	 */
+	private JSONArray readClipCache() {
+		clipTotal = 0;
+		java.io.File f = new java.io.File(getFilesDir(), "clips.json");
+		if (!f.isFile() || f.length() == 0) {
+			return null;
+		}
+		try (java.io.BufferedReader r = new java.io.BufferedReader(
+				new java.io.InputStreamReader(
+						new java.io.FileInputStream(f), "UTF-8"))) {
+			JSONArray arr = new JSONArray();
+			String line;
+			while ((line = r.readLine()) != null) {
+				line = line.trim();
+				if (line.isEmpty()) {
+					continue;
+				}
+				try {
+					JSONObject o = new JSONObject(line);
+					if (o.has("total")) {
+						clipTotal = o.optInt("total", 0);
+					} else {
+						arr.put(o);
+					}
+				} catch (Exception ignored) {
+					// A truncated cache is not worth failing the tab for.
+				}
+			}
+			return arr.length() == 0 ? null : arr;
+		} catch (Exception e) {
+			return null;
+		}
+	}
+
+	/** Keep the last good list for the next open. Written off the UI thread. */
+	private void saveClipCache(JSONArray arr, int total) {
+		if (arr == null) {
+			return;
+		}
+		java.io.File dir = getFilesDir();
+		java.io.File tmp = new java.io.File(dir, "clips.json.tmp");
+		java.io.File dst = new java.io.File(dir, "clips.json");
+		try (java.io.BufferedWriter w = new java.io.BufferedWriter(
+				new java.io.OutputStreamWriter(
+						new java.io.FileOutputStream(tmp), "UTF-8"))) {
+			w.write("{\"total\":" + Math.max(total, arr.length()) + "}");
+			w.write('\n');
+			for (int i = 0; i < arr.length(); i++) {
+				JSONObject o = arr.optJSONObject(i);
+				if (o != null) {
+					w.write(o.toString());
+					w.write('\n');
+				}
+			}
+		} catch (Exception e) {
+			tmp.delete();
+			return;
+		}
+		if (!tmp.renameTo(dst)) {
+			dst.delete();
+			tmp.renameTo(dst);
+		}
 	}
 
 	/** One history entry, as the module recorded it. */
@@ -1989,10 +2305,12 @@ public class MainActivity extends Activity {
 		if (pClip == null) {
 			return;
 		}
+		clipBuilt = true;
 		pClip.removeAllViews();
 
 		List<ClipEntry> entries = clipsFrom(arr);
 		clipEntries = entries;
+		clipShown.clear();
 
 		// The search box, and nothing else.
 		//
@@ -2004,9 +2322,59 @@ public class MainActivity extends Activity {
 		searchField(g, entries);
 
 		if (entries.isEmpty()) {
-			note(pClip, arr == null
-					? getString(R.string.failed, "the clipboard could not be read")
-					: getString(R.string.clip_empty));
+			// An empty state that looks designed: an icon and friendly
+			// copy centred on the screen, not a bare line of text tucked
+			// into a corner.
+			boolean failed = arr == null;
+			LinearLayout empty = new LinearLayout(this);
+			empty.setOrientation(LinearLayout.VERTICAL);
+			empty.setGravity(android.view.Gravity.CENTER);
+			empty.setPadding(dp(16), dp(40), dp(16), dp(16));
+
+			ImageView ic = new ImageView(this);
+			ic.setImageResource(failed ? R.drawable.ic_lock : R.drawable.ic_clip);
+			ic.setColorFilter(getColor(R.color.hint));
+			LinearLayout.LayoutParams icp = new LinearLayout.LayoutParams(
+					dp(56), dp(56));
+			icp.topMargin = dp(4);
+			icp.bottomMargin = dp(16);
+			empty.addView(ic, icp);
+
+			TextView title = new TextView(this);
+			title.setText(failed
+					? getString(R.string.clip_load_failed_title)
+					: getString(R.string.clip_empty_title));
+			title.setTextColor(getColor(R.color.text));
+			title.setTextSize(16f);
+			title.setTypeface(null, android.graphics.Typeface.BOLD);
+			title.setIncludeFontPadding(false);
+			title.setGravity(android.view.Gravity.CENTER);
+			empty.addView(title);
+
+			TextView body = new TextView(this);
+			body.setText(failed
+					? getString(R.string.clip_load_failed_body)
+					: getString(R.string.clip_empty_body));
+			body.setTextColor(getColor(R.color.text2));
+			body.setTextSize(13.5f);
+			body.setIncludeFontPadding(false);
+			body.setGravity(android.view.Gravity.CENTER);
+			body.setLineSpacing(dp(4), 1f);
+			empty.addView(body);
+
+			if (failed) {
+				TextView retry = new TextView(this);
+				retry.setText(getString(R.string.clip_retry));
+				retry.setTextColor(getColor(R.color.accent));
+				retry.setTextSize(14f);
+				retry.setIncludeFontPadding(false);
+				retry.setGravity(android.view.Gravity.CENTER);
+				retry.setPadding(0, dp(16), 0, 0);
+				retry.setOnClickListener(v -> loadClipboard());
+				empty.addView(retry);
+			}
+
+			pClip.addView(empty);
 			return;
 		}
 
@@ -2059,7 +2427,18 @@ public class MainActivity extends Activity {
 		clipList = new LinearLayout(this);
 		clipList.setOrientation(LinearLayout.VERTICAL);
 		pClip.addView(clipList);
+
+		clipFooter = new TextView(this);
+		clipFooter.setTextColor(getColor(R.color.hint));
+		clipFooter.setTextSize(12f);
+		clipFooter.setPadding(dp(4), dp(10), dp(4), dp(2));
+		clipFooter.setVisibility(View.GONE);
+		pClip.addView(clipFooter);
+
+		clipRenderSig = "none";
+		clipRenderGen++;
 		refreshClipList();
+		paintClipFooter();
 
 		// The note about root goes at the bottom. It is reference, not
 		// something to read before using the screen.
@@ -2084,51 +2463,58 @@ public class MainActivity extends Activity {
 			ic.setImageResource(R.drawable.ic_clip);
 			ic.setColorFilter(getColor(R.color.hint));
 		}
-		LinearLayout.LayoutParams icp = new LinearLayout.LayoutParams(dp(22), dp(22));
-		icp.setMargins(0, 0, dp(12), 0);
+		LinearLayout.LayoutParams icp = new LinearLayout.LayoutParams(dp(30), dp(30));
+		icp.setMargins(0, 0, dp(14), 0);
 		row.addView(ic, icp);
 
 		LinearLayout col = col();
+
+		// Title: the copied text.
 		TextView t = new TextView(this);
 		t.setText(clipShown(e));
 		t.setTextColor(getColor(R.color.text));
 		t.setTextSize(14.5f);
 		t.setMaxLines(2);
 		t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+		t.setIncludeFontPadding(false);
 		col.addView(t);
 
+		// Subtitle: who copied it and when.
 		TextView sub = new TextView(this);
 		sub.setText(clipSource(e));
-		sub.setTextColor(getColor(R.color.hint));
+		sub.setTextColor(getColor(R.color.text2));
 		sub.setTextSize(12f);
 		sub.setPadding(0, dp(3), 0, 0);
+		sub.setIncludeFontPadding(false);
 		col.addView(sub);
 
 		row.addView(col, new LinearLayout.LayoutParams(0,
 				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
 		// The star.
-		//
-		// A starred entry is one the person decided to keep, so the
-		// limits never remove it and only they can unstar it.
 		ImageView star = new ImageView(this);
 		star.setImageResource(R.drawable.ic_star);
-		star.setColorFilter(getColor(e.starred ? R.color.accent : R.color.hint));
-		star.setPadding(dp(9), dp(9), dp(4), dp(9));
-		star.setContentDescription(getString(R.string.clip_star));
+		if (e.starred) {
+			star.setColorFilter(getColor(R.color.ok));
+			star.setAlpha(1f);
+		} else {
+			star.setColorFilter(getColor(R.color.hint));
+			star.setAlpha(0.5f);
+		}
+		star.setPadding(dp(8), dp(8), dp(8), dp(8));
+		star.setContentDescription(e.starred
+				? getString(R.string.clip_unstar)
+				: getString(R.string.clip_star));
 		star.setOnClickListener(v -> toggleStar(e, star));
-		row.addView(star, new LinearLayout.LayoutParams(dp(36), dp(40)));
+		row.addView(star, new LinearLayout.LayoutParams(dp(40), dp(40)));
 
 		row.setOnClickListener(v -> showClipEntry(e));
-		// A long press is the way things are deleted on a phone, and it
-		// leaves the tap free for reading the entry.
 		row.setOnLongClickListener(v -> {
 			clipRowMenu(e);
 			return true;
 		});
 		g.addView(row);
 	}
-
 	/** Star an entry, or unstar it. */
 	private void toggleStar(ClipEntry e, ImageView star) {
 		new Thread(() -> {
@@ -2239,21 +2625,53 @@ public class MainActivity extends Activity {
 		// on a bad one, and a copy in front of somebody who is waiting is
 		// not something to make them wait for.
 		showLiveClipInstantly();
-		new Thread(() -> {
-			try {
-				final JSONArray arr = Api.clipboardList();
-				ui.post(() -> {
-					clipEntries = clipsFrom(arr);
-					refreshClipList();
-				});
-			} catch (Exception ignored) {
-				// Leave what is on screen; the next poll tries again.
-			}
-		}).start();
+		// Once older pages are loaded, a full first-page refresh would throw
+		// them away and shrink the list back to one page. The copy that just
+		// happened is already on screen; the module's entry for it arrives
+		// with the next tab open or search.
+		if (clipLoaded <= CLIP_PAGE) {
+			loadClipboard();
+		}
 	}
 
+	/** The in-progress transfer dialog, so a big file does not look like
+	 *  nothing is happening while `tailscale file cp` runs. */
+	private android.app.ProgressDialog sendProgress;
 	/** The entries the list is showing. */
 	private List<ClipEntry> clipEntries = new ArrayList<>();
+	/** Fetch bookkeeping. One fetch at a time: the root shell is a single
+	 *  serialized pipe, and three callers asking at once made each answer
+	 *  slower than the one before it. */
+	private final Object clipFetchLock = new Object();
+	private boolean clipFetching;
+	private boolean clipFetchAgain;
+	/** Whether the panel has ever been built. Until it has, the Clip tab
+	 *  paints from the saved list instead of waiting for a fresh one. */
+	private boolean clipBuilt;
+	/** When the list last came back, for "is this stale enough to refetch". */
+	private long clipFetchedAt;
+	/** How many entries are held, and whether the module has more. */
+	private int clipLoaded;
+	/** How many entries the module holds, not just how many are loaded. */
+	private int clipTotal;
+	private boolean clipHasMore;
+	/** The rows currently built, and whether they are a search result. */
+	private final List<ClipEntry> clipShown = new ArrayList<>();
+	private boolean clipSearching;
+	private boolean clipLoadingMore;
+	/** Bumped on every keystroke so a slow search cannot overwrite a newer one. */
+	private int clipSearchGen;
+	/** One page is one root round trip and one screenful and a bit. */
+	private static final int CLIP_PAGE = 100;
+	/** A bound on how much of a huge history is ever built as views. Beyond
+	 *  this the list says so and the search box is the way further back. */
+	private static final int CLIP_MAX_LOADED = 1000;
+	private final Runnable clipSearchTick = this::loadClipboard;
+	/** The listing last drawn; an unchanged answer is not redrawn. */
+	private String clipRenderSig = "none";
+	/** Bumped on every rebuild so pending row batches from an older list
+	 *  cannot append themselves to the new one. */
+	private int clipRenderGen;
 	/** What is in the search box. */
 	private String clipQuery = "";
 	private static final String KEY_CLIP_QUERY = "clipQuery";
@@ -2271,33 +2689,192 @@ public class MainActivity extends Activity {
 		if (clipList == null || clipListHeading == null) {
 			return;
 		}
-		String q = clipQuery;
-		List<ClipEntry> shown = clipFiltered(clipEntries, q);
-		if (clipStarOnly) {
-			List<ClipEntry> starred = new ArrayList<>();
-			for (ClipEntry e : shown) {
-				if (e.starred) {
-					starred.add(e);
+		List<ClipEntry> shown = visibleClips();
+		int count = (clipStarOnly || clipSearching) ? shown.size()
+				: Math.max(clipTotal, shown.size());
+		clipListHeading.setText(getString(R.string.clip_entry_count, count));
+
+		// An unchanged answer is not redrawn. The list is refreshed every
+		// fifteen seconds while it is on screen, and tearing down and
+		// rebuilding every row for an answer that had not changed was the
+		// reason scrolling stuttered and the screen jumped to the top.
+		String s = clipSignature(shown);
+		if (s.equals(clipRenderSig)) {
+			return;
+		}
+		clipRenderSig = s;
+
+		// A page appended to the end is appended, not rebuilt. Only a change
+		// in what is already on screen -- a star, a new copy, a search --
+		// costs a rebuild.
+		boolean extendsShown = shown.size() >= clipShown.size();
+		if (extendsShown) {
+			for (int i = 0; i < clipShown.size(); i++) {
+				ClipEntry a = clipShown.get(i);
+				ClipEntry b = shown.get(i);
+				if (!a.id.equals(b.id) || a.starred != b.starred
+						|| a.text.length() != b.text.length()) {
+					extendsShown = false;
+					break;
 				}
 			}
-			shown = starred;
+		}
+		if (extendsShown) {
+			int from = clipShown.size();
+			clipShown.addAll(shown.subList(from, shown.size()));
+			appendClipRows(shown, from, ++clipRenderGen);
+			return;
 		}
 
-		// The same text twice is one entry, not two.
-		List<ClipEntry> merged = new ArrayList<>();
+		clipShown.clear();
+		clipShown.addAll(shown);
+		final int gen = ++clipRenderGen;
+		clipList.removeAllViews();
+		appendClipRows(shown, 0, gen);
+	}
+
+	/** The rows the list should have, in order: starred first if asked, and
+	 *  the same text twice collapsed to one entry. */
+	private int clipLoadedTotal(List<ClipEntry> entries) {
+		return entries.size();
+	}
+
+	private List<ClipEntry> visibleClips() {
+		List<ClipEntry> out = new ArrayList<>();
 		String last = null;
-		for (ClipEntry e : shown) {
+		for (ClipEntry e : clipEntries) {
+			if (clipStarOnly && !e.starred) {
+				continue;
+			}
 			if (e.text.equals(last)) {
 				continue;
 			}
 			last = e.text;
-			merged.add(e);
+			out.add(e);
 		}
-		shown = merged;
-		clipListHeading.setText(getString(R.string.clip_entry_count, shown.size()));
-		clipList.removeAllViews();
+		return out;
+	}
+
+	private String clipSignature(List<ClipEntry> shown) {
+		StringBuilder sig = new StringBuilder(shown.size() * 24);
 		for (ClipEntry e : shown) {
-			clipRow(clipList, e);
+			sig.append(e.id).append(':').append(e.starred ? '1' : '0')
+					.append(':').append(e.text.length()).append(':')
+					.append(e.text.hashCode()).append('\n');
+		}
+		return sig.toString();
+	}
+
+	/** Fetch the next page, when the end of the list is coming up. */
+	private void loadMoreClips() {
+		synchronized (clipFetchLock) {
+			if (clipFetching || clipLoadingMore || clipSearching || !clipHasMore) {
+				return;
+			}
+			if (clipLoaded >= CLIP_MAX_LOADED) {
+				return;
+			}
+			clipLoadingMore = true;
+		}
+		final int offset = clipLoaded;
+		new Thread(() -> {
+			JSONArray arr = null;
+			try {
+				arr = Api.clipboardList(CLIP_PAGE, offset);
+			} catch (Exception ignored) {
+				// The next scroll tries again.
+			}
+			final JSONArray got = arr;
+			ui.post(() -> {
+				synchronized (clipFetchLock) {
+					clipLoadingMore = false;
+				}
+				if (got == null) {
+					return;
+				}
+				clipHasMore = clipTotal > 0 ? clipLoaded < clipTotal
+						: got.length() >= CLIP_PAGE;
+				int added = 0;
+				java.util.HashSet<String> have = new java.util.HashSet<>();
+				for (ClipEntry e : clipEntries) {
+					if (!e.id.isEmpty()) {
+						have.add(e.id);
+					}
+				}
+				for (int i = 0; i < got.length(); i++) {
+					JSONObject o = got.optJSONObject(i);
+					if (o == null) {
+						continue;
+					}
+					String id = o.optString("id", "");
+					if (!id.isEmpty() && have.contains(id)) {
+						continue;
+					}
+					ClipEntry e = new ClipEntry();
+					e.id = id;
+					e.time = o.optLong("t", 0);
+					e.text = decode(o.optString("c", ""));
+					e.source = o.optString("s", "");
+					e.fromPeer = o.optInt("d", 0) == 1;
+					e.starred = o.optInt("p", 0) == 1;
+					have.add(id);
+					clipEntries.add(e);
+					added++;
+				}
+				clipLoaded += got.length();
+				if (added > 0) {
+					// The icons for this page, resolved before the rows are
+					// built rather than during the frame.
+					new Thread(() -> {
+						for (ClipEntry e : clipEntries) {
+							if (!e.source.isEmpty()) {
+								appLabel(e.source);
+								appIcon(e.source);
+							}
+						}
+					}).start();
+					refreshClipList();
+				}
+				if (!clipHasMore || clipLoaded >= CLIP_MAX_LOADED) {
+					paintClipFooter();
+				}
+			});
+		}).start();
+	}
+
+	private void paintClipFooter() {
+		if (clipFooter == null) {
+			return;
+		}
+		if (clipSearching) {
+			clipFooter.setVisibility(View.GONE);
+			return;
+		}
+		if (clipLoaded >= CLIP_MAX_LOADED && clipHasMore) {
+			clipFooter.setText(getString(R.string.clip_cap, String.valueOf(clipLoaded)));
+			clipFooter.setVisibility(View.VISIBLE);
+		} else {
+			clipFooter.setVisibility(View.GONE);
+		}
+	}
+
+	/** Add the next batch of rows, yielding to the frame between batches.
+	 *
+	 *  <p>Two hundred rows of six views each is a lot to build in one go on
+	 *  the UI thread; the screen stayed blank until the last one was done.
+	 *  The first screenful appears immediately and the rest follows, which
+	 *  is what makes the tab feel like it opened rather than loaded.
+	 */
+	private void appendClipRows(List<ClipEntry> shown, int from, int gen) {
+		if (clipList == null || gen != clipRenderGen) {
+			return;
+		}
+		int to = Math.min(shown.size(), from + 30);
+		for (int i = from; i < to; i++) {
+			clipRow(clipList, shown.get(i));
+		}
+		if (to < shown.size()) {
+			clipList.postDelayed(() -> appendClipRows(shown, to, gen), 16);
 		}
 	}
 
@@ -2456,7 +3033,11 @@ public class MainActivity extends Activity {
 			@Override public void onTextChanged(CharSequence c, int a, int b, int d) {}
 			@Override public void afterTextChanged(android.text.Editable e) {
 				clipQuery = e.toString().trim().toLowerCase();
-				refreshClipList();
+				// The module searches its whole store, not the page that
+				// happens to be loaded, and that is a root round trip: wait
+				// for the typing to stop rather than one per keystroke.
+				ui.removeCallbacks(clipSearchTick);
+				ui.postDelayed(clipSearchTick, 300);
 			}
 		});
 		return row;
@@ -3157,7 +3738,20 @@ public class MainActivity extends Activity {
 			toast(getString(R.string.pick_a_device));
 			return;
 		}
-		toast(getString(R.string.sending));
+		// Non-dismissible spinner while transfers run. No cycling dots:
+		// one steady state that says work is happening, then a "Sent"
+		// confirmation when it is done.
+		ui.post(() -> {
+			sendProgress = new android.app.ProgressDialog(this,
+					R.style.Theme_Share_Dialog);
+			sendProgress.setTitle(getString(R.string.send_progress_title));
+			sendProgress.setMessage(getString(R.string.send_progress_sending));
+			sendProgress.setProgressStyle(
+					android.app.ProgressDialog.STYLE_SPINNER);
+			sendProgress.setIndeterminate(true);
+			sendProgress.setCancelable(false);
+			sendProgress.show();
+		});
 		new Thread(() -> {
 			try {
 				java.io.File dir = new java.io.File(getCacheDir(), "send");
@@ -3176,7 +3770,15 @@ public class MainActivity extends Activity {
 				int ok = 0;
 				StringBuilder problems = new StringBuilder();
 				for (String peer : targets) {
+					String peerName = null;
+					for (Map.Entry<String,String> e : peers.entrySet()) {
+						if (peer.equals(e.getValue())) {
+							peerName = e.getKey();
+							break;
+						}
+					}
 					for (java.io.File f : files) {
+						final String fn = peerName == null ? peer : peerName;
 						try {
 							Api.send(peer, f.getAbsolutePath());
 							ok++;
@@ -3198,6 +3800,12 @@ public class MainActivity extends Activity {
 						}
 					}
 				}
+				ui.post(() -> {
+					if (sendProgress != null) {
+						sendProgress.dismiss();
+						sendProgress = null;
+					}
+				});
 				final int fOk = ok, fFailed = failed;
 				final String p = problems.toString().trim();
 				ui.post(() -> {

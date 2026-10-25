@@ -332,8 +332,18 @@ public class ClipStore {
 						parsable(parts, 2) ? Integer.parseInt(parts[2]) : 0).toString();
 			case "list": {
 				int n = parsable(parts, 1) ? Integer.parseInt(parts[1]) : 200;
-				String out = history.list(n);
+				int offset = parsable(parts, 2) ? Integer.parseInt(parts[2]) : 0;
+				String out = history.list(n, offset);
 				return out.isEmpty() ? "[]" : out;
+			}
+			case "page": {
+				// The total first, then the rows. The app needs the real
+				// count to say how much history there is without loading
+				// all of it.
+				int n = parsable(parts, 1) ? Integer.parseInt(parts[1]) : 100;
+				int offset = parsable(parts, 2) ? Integer.parseInt(parts[2]) : 0;
+				return "{\"total\":" + history.size() + "}\n"
+						+ history.list(n, offset);
 			}
 			case "search":
 				return history.search(payload.trim());

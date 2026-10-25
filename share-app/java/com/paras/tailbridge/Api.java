@@ -262,11 +262,20 @@ final class Api {
 	 * are arbitrary text that ends in one more often than not.
 	 */
 	static JSONArray clipboardList() throws Exception {
-		// The module answers with one JSON object per line, newest first,
-		// and only as many as were asked for. Asking for the whole store
-		// meant a few hundred kilobytes over a root round trip every
-		// time the list was refreshed.
-		String out = callRaw(DEFAULT_TIMEOUT_MS, "clipboard", "list", "200");
+		return clipboardList(200, 0);
+	}
+
+	/**
+	 * One page of the history, newest first.
+	 *
+	 * <p>The module answers with one JSON object per line. A page is the
+	 * unit because a store of ten thousand entries is megabytes of text and
+	 * seconds of decrypting, and the screen can show the first screenful
+	 * long before anybody scrolls to the last row.
+	 */
+	static JSONArray clipboardList(int limit, int offset) throws Exception {
+		String out = callRaw(DEFAULT_TIMEOUT_MS, "clipboard", "list",
+				String.valueOf(limit), String.valueOf(offset));
 		JSONArray arr = new JSONArray();
 		for (String line : out.split("\n")) {
 			line = line.trim();
@@ -280,6 +289,62 @@ final class Api {
 			}
 		}
 		return arr;
+	}
+
+	/** One page plus the size of the whole store. */
+	static final class ClipPage {
+		JSONArray entries = new JSONArray();
+		int total;
+	}
+
+	/**
+	 * A page of the history, and how many entries there are in total.
+	 *
+	 * <p>The total travels with the first page so the heading can be right
+	 * before anybody scrolls. A module that predates it answers "unknown
+	 * command", and the page is fetched the old way.
+	 */
+	static ClipPage clipboardPage(int limit, int offset) throws Exception {
+		String out = callRaw(DEFAULT_TIMEOUT_MS, "clipboard", "page",
+				String.valueOf(limit), String.valueOf(offset));
+		ClipPage page = new ClipPage();
+		boolean sawTotal = false;
+		for (String line : out.split("\n")) {
+			line = line.trim();
+			if (line.isEmpty()) {
+				continue;
+			}
+			try {
+				JSONObject o = new JSONObject(line);
+				if (o.has("total")) {
+					page.total = o.optInt("total", 0);
+					sawTotal = true;
+				} else {
+					page.entries.put(o);
+				}
+			} catch (Exception ignored) {
+				// Not an object: the module is older, and the fallback
+				// below deals with it.
+			}
+		}
+		if (!sawTotal) {
+			page.entries = clipboardList(limit, offset);
+			page.total = page.entries.length() + offset;
+		} else if (page.total < page.entries.length() + offset) {
+			page.total = page.entries.length() + offset;
+		}
+		return page;
+	}
+
+	/** Everything matching a query, newest first. Run by the module, not by
+	 *  filtering the page that happens to be loaded. */
+	static JSONArray clipboardSearch(String query) throws Exception {
+		String out = callRaw(DEFAULT_TIMEOUT_MS, "clipboard", "search", query).trim();
+		int i = out.indexOf('[');
+		if (i < 0) {
+			return new JSONArray();
+		}
+		return new JSONArray(out.substring(i));
 	}
 
 	/** The clipboard right now, not the last one recorded. */

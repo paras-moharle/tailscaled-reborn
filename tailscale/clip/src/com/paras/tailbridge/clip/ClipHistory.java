@@ -479,13 +479,34 @@ final class ClipHistory {
 
 	/** The newest n entries, newest first. n of zero means everything. */
 	String list(int n) throws Exception {
+		return list(n, 0);
+	}
+
+	/** A page of the newest entries.
+	 *
+	 *  <p>offset is how many of the newest entries to skip. Paging is what
+	 *  lets the app open instantly against a store of thousands: it asks for
+	 *  the first screenful, draws it, and asks for the next page only when
+	 *  somebody scrolls to it. Asking for everything meant decrypting the
+	 *  whole history and shipping megabytes for a list nobody had looked at
+	 *  past the first few rows.
+	 */
+	String list(int n, int offset) throws Exception {
 		synchronized (lock) {
 			StringBuilder out = new StringBuilder();
+			int start = entries.size() - 1 - Math.max(0, offset);
 			int want = (n <= 0) ? entries.size() : n;
-			for (int i = entries.size() - 1; i >= 0 && want > 0; i--, want--) {
+			for (int i = start; i >= 0 && want > 0; i--, want--) {
 				out.append(openEntry(entries.get(i)).toString()).append('\n');
 			}
 			return out.toString();
+		}
+	}
+
+	/** How many entries the store holds, as a number. */
+	int size() {
+		synchronized (lock) {
+			return entries.size();
 		}
 	}
 

@@ -849,13 +849,17 @@ api_clipboard() {
 		_n="${1:-200}"
 		case "$_n" in '' | *[!0-9]*) _n=200 ;; esac
 		[ "$_n" -gt 5000 ] && _n=5000
+		# How many of the newest entries to skip, for the next page.
+		_o="${2:-0}"
+		case "$_o" in '' | *[!0-9]*) _o=0 ;; esac
+		[ "$_o" -gt 50000 ] && _o=50000
 		# -c: one entry per line. Pretty-printed, the same data is three
 		# times the size and the app has to parse all of it.
 		#
 		# The desk answers this from its index: the newest n entries, one
 		# line each, the text already opened for the entries asked for.
 		# The whole tail-fallback below is for when the desk is down.
-		_out="$(clip_crypto list "$_n" 2>/dev/null)"
+		_out="$(clip_crypto list "$_n" "$_o" 2>/dev/null)" || true
 		case "$_out" in
 		'' | err:*)
 			clip_store_tail "$_n" | "$JQ" -c -s --argjson n "$_n" 'reverse | .[0:$n] | .[]' \
@@ -863,6 +867,30 @@ api_clipboard() {
 			;;
 		*) printf '%s\n' "$_out" ;;
 		esac
+		;;
+	page)
+		# A page of the store, with the total on the first line. One round
+		# trip answers both "show these" and "how many are there".
+		_n="${1:-100}"
+		case "$_n" in '' | *[!0-9]*) _n=100 ;; esac
+		_o="${2:-0}"
+		case "$_o" in '' | *[!0-9]*) _o=0 ;; esac
+		_out="$(clip_crypto page "$_n" "$_o" 2>/dev/null)" || true
+		case "$_out" in
+		'' | err:*)
+			_total=0
+			[ -f "$CLIP_STORE" ] && _total="$(wc -l < "$CLIP_STORE" 2>/dev/null)"
+			case "$_total" in '' | *[!0-9]*) _total=0 ;; esac
+			printf '{"total":%s}\n' "$_total"
+			clip_store_tail "$_n" | "$JQ" -c -s --argjson n "$_n" 'reverse | .[0:$n] | .[]' \
+				2>/dev/null || true
+			;;
+		*) printf '%s\n' "$_out" ;;
+		esac
+		;;
+	count)
+		[ -f "$CLIP_STORE" ] || { printf '0\n'; return 0; }
+		wc -l < "$CLIP_STORE" 2>/dev/null || echo 0
 		;;
 	search)
 		_q="${1:-}"

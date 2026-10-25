@@ -20,6 +20,12 @@
 	<string name="clip_watching">Watching the clipboard</string>
 	<string name="clip_watching_off">The clipboard watcher is not running</string>
 	<string name="clip_empty">Nothing copied yet. Anything you copy appears here.</string>
+	<string name="clip_empty_title">Nothing copied yet</string>
+	<string name="clip_empty_body">Anything you copy appears here.</string>
+	<string name="clip_load_failed_title">Could not load clips</string>
+	<string name="clip_load_failed_body">The clipboard history cannot be read. Try again.</string>
+	<string name="clip_retry">Try again</string>
+	<string name="clip_cap">Showing the newest %1$s entries. Search to reach older ones.</string>
 	<string name="clip_send_all">Send the clipboard to every online device</string>
 	<string name="clip_now">Clipboard right now</string>
 	<string name="clip_now_empty">The clipboard is empty</string>
@@ -43,6 +49,7 @@
 	<string name="clip_d_watch">Record what you copy, and where it came from</string>
 	<string name="clip_recording">Recording</string>
 	<string name="clip_star">Star</string>
+	<string name="clip_unstar">Unstar</string>
 	<string name="clip_starred_only">Show only the starred entries</string>
 	<string name="clip_delete">Delete</string>
 	<string name="clip_delete_confirm">Delete this entry?</string>
@@ -76,8 +83,13 @@
 	<string name="no_peers_short">No devices online</string>
 	<string name="shared_n">%1$d item(s) ready — tick the devices above, then send.</string>
 	<string name="sending">Sending…</string>
-	<string name="sent_ok">Sent %1$d file(s) to %2$d device(s)</string>
+	<string name="sent_ok">✓ Sent %1$d file(s) to %2$d device(s)</string>
 	<string name="sent_partial">%1$d delivered, %2$d failed</string>
+	<string name="send_progress_title">Sending</string>
+	<string name="send_progress_sending">Sending</string>
+	<string name="send_done">✓ Sent</string>
+	<string name="send_progress_starting">Starting transfer…</string>
+	<string name="send_progress_file">%1$s → %2$s  %3$s%% (%4$s of %5$s, %6$s KB)</string>
 	<string name="send_failed">Send failed</string>
 	<string name="no_picker">No file picker available</string>
 
