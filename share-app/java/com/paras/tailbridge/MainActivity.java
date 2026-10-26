@@ -4,7 +4,6 @@
 package com.paras.tailbridge;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.Network;
@@ -26,7 +25,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -467,6 +465,8 @@ public class MainActivity extends Activity {
 		refresh();
 		startPolling();
 		registerClipboardListener();
+		ui.removeCallbacks(clipClock);
+		ui.postDelayed(clipClock, 30_000);
 	}
 
 
@@ -592,6 +592,7 @@ public class MainActivity extends Activity {
 	@Override
 	protected void onPause() {
 		super.onPause();
+		ui.removeCallbacks(clipClock);
 		stopPolling();
 		if (clipSystemListener != null) {
 			try {
@@ -697,73 +698,6 @@ public class MainActivity extends Activity {
 		}
 	}
 
-	/** Every dialog goes through here so they all share the app's surface. */
-	private AlertDialog.Builder alert() {
-		return new AlertDialog.Builder(this, R.style.Theme_Share_Dialog);
-	}
-
-	/** Style every dialog's buttons the same way: the primary action in
-	 *  accent so it is the thing the eye lands on, Cancel de-emphasised in
-	 *  grey so it never competes, and sentence case throughout. Called
-	 *  after the dialog is shown so the buttons exist to style. */
-	private void styleDialog(android.app.AlertDialog d) {
-		android.widget.Button pos = d.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
-		if (pos != null) {
-			pos.setTextColor(getColor(R.color.accent));
-			pos.setAllCaps(false);
-			pos.setTextSize(14.5f);
-			android.graphics.Typeface tf = android.graphics.Typeface.create(
-					android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-			pos.setTypeface(tf);
-			pos.setPadding(dp(16), dp(8), dp(16), dp(8));
-		}
-		android.widget.Button neg = d.getButton(android.app.AlertDialog.BUTTON_NEGATIVE);
-		if (neg != null) {
-			neg.setTextColor(getColor(R.color.hint));
-			neg.setAllCaps(false);
-			neg.setTextSize(14.5f);
-			neg.setTypeface(android.graphics.Typeface.DEFAULT);
-			neg.setPadding(dp(16), dp(8), dp(16), dp(8));
-		}
-		android.widget.Button neu = d.getButton(android.app.AlertDialog.BUTTON_NEUTRAL);
-		if (neu != null) {
-			neu.setTextColor(getColor(R.color.hint));
-			neu.setAllCaps(false);
-			neu.setTextSize(14.5f);
-			neu.setTypeface(android.graphics.Typeface.DEFAULT);
-			neu.setPadding(dp(16), dp(8), dp(16), dp(8));
-		}
-	}
-
-	// ----------------------------------------------------------------- data
-
-	/**
-	 * The refresh button.
-	 *
-	 * <p>Forces a fresh read instead of re-rendering what is already held:
-	 * peer presence, the daemon state and the address list all change on the
-	 * device, not in this process, so only a new root round-trip can see it.
-	 * Restarts the poll chain too, so the next automatic read is a full
-	 * interval away rather than firing immediately on top of this one.
-	 */
-	/**
-	 * Push the status-bar height into the header's top padding.
-	 *
-	 * <p>The layout carries a paddingTop as a floor, but a fixed number cannot
-	 * be right: on this device the header sat under the clock. Reading the
-	 * actual inset is the difference between a title that has room and one that
-	 * fights the system bar, and it adapts to cutouts and gesture bars too.
-	 */
-
-	/**
-	 * Pull down anywhere on a list to refresh.
-	 *
-	 * <p>Hand-rolled because this app has no AndroidX, and SwipeRefreshLayout is
-	 * an AndroidX view: adding it for one gesture would mean the app depends on
-	 * a library it currently has no use for. The gesture is small -- a downward
-	 * drag past the threshold while the list is already at the top.
-	 */
-	/** Deliveries the receiver has exported, for the System tab. */
 	private int receivedCount;
 
 	/** Open Downloads/Tailscale in whichever file manager is installed. */
@@ -1029,269 +963,142 @@ public class MainActivity extends Activity {
 		}
 		pickerShown = true;
 
-		final CharSequence[] labels = new CharSequence[ps.size()];
-		final boolean[] enabled = new boolean[ps.size()];
-		final boolean[] checked = new boolean[ps.size()];
+		final boolean[] picked = new boolean[ps.size()];
 		for (int i = 0; i < ps.size(); i++) {
 			Api.Peer p = ps.get(i);
-			enabled[i] = p.online;
-			checked[i] = p.online && chosen.contains(p.name);
-			labels[i] = (p.online ? "●  " : "○  ") + p.name
-					+ (p.online ? "" : "  (" + getString(R.string.peer_offline_label) + ")");
+			picked[i] = p.online && chosen.contains(p.name);
 		}
 
-		// Per-row disable needs a ListAdapter whose isEnabled() is consulted by
-		// ListView. setMultiChoiceItems() cannot take a custom adapter, so the
-		// rows are built here: an offline device stays visible but cannot be
-		// ticked, which is the point -- hiding it would make a machine that is
-		// merely down look deleted.
-		final boolean[] picked = checked.clone();
-		// The row click handler below recolours the Send button through this,
-		// rather than installing its own listener on the button -- which would
-		// replace the dialog's and silently break sending.
-		final android.widget.Button[] sendRef = new android.widget.Button[1];
+		final Sheet sheet = Sheet.card(this)
+				.title(getString(R.string.choose_devices))
+				.subtitle(getString(R.string.share_n_files, pendingUris.size()));
 
-		android.widget.BaseAdapter adapter = new android.widget.BaseAdapter() {
-			@Override
-			public int getCount() {
-				return labels.length;
-			}
+		LinearLayout list = new LinearLayout(this);
+		list.setOrientation(LinearLayout.VERTICAL);
 
-			@Override
-			public Object getItem(int i) {
-				return labels[i];
-			}
+		for (int i = 0; i < ps.size(); i++) {
+			final Api.Peer p = ps.get(i);
+			final int index = i;
+			final boolean on = p.online;
 
-			@Override
-			public long getItemId(int i) {
-				return i;
-			}
+			LinearLayout row = new LinearLayout(this);
+			row.setOrientation(LinearLayout.HORIZONTAL);
+			row.setGravity(Gravity.CENTER_VERTICAL);
+			row.setPadding(dp(6), dp(9), dp(6), dp(9));
+			row.setBackgroundResource(R.drawable.row_press);
+			row.setAlpha(on ? 1f : 0.62f);
 
-			@Override
-			public boolean isEnabled(int i) {
-				return enabled[i];
-			}
+			// A coin with the first letter: a list of machine names is read
+			// by its initials before it is read at all.
+			TextView coin = new TextView(this);
+			String nm = p.name == null || p.name.isEmpty() ? "?" : p.name;
+			coin.setText(nm.substring(0, 1).toUpperCase());
+			coin.setGravity(Gravity.CENTER);
+			coin.setTextSize(15);
+			coin.setTypeface(null, android.graphics.Typeface.BOLD);
+			coin.setTextColor(getColor(on ? R.color.accentHi : R.color.hint));
+			android.graphics.drawable.GradientDrawable disc =
+					new android.graphics.drawable.GradientDrawable();
+			disc.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+			disc.setColor(getColor(on ? R.color.accentDim : R.color.hairline));
+			coin.setBackground(disc);
+			row.addView(coin, new LinearLayout.LayoutParams(dp(38), dp(38)));
 
-			/**
-			 * One device: a letter on a coloured coin, its name and its
-			 * state in words, and the switch that takes it.
-			 *
-			 * <p>The coin is drawn, not an asset: the first letter of the
-			 * machine's name on a disc tinted by state means the eye can
-			 * pick a device from a list of six without reading one line.
-			 * The switch's thumb follows, tinted the accent when the
-			 * machine is coming along and the plain grey when it is not,
-			 * so the list reads top to bottom the way the Send button
-			 * reads: what is coming, what is not.
-			 */
-			@Override
-			public android.view.View getView(int i, android.view.View convert,
-					android.view.ViewGroup parent) {
-				Api.Peer p = ps.get(i);
-				final boolean on = enabled[i];
+			LinearLayout col = new LinearLayout(this);
+			col.setOrientation(LinearLayout.VERTICAL);
 
-				android.widget.LinearLayout row = new android.widget.LinearLayout(MainActivity.this);
-				row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-				row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-				row.setPadding(dp(18), dp(11), dp(14), dp(11));
-				row.setBackground(getDrawable(R.drawable.row_press));
+			TextView name = new TextView(this);
+			name.setText(p.name);
+			name.setTextColor(getColor(on ? R.color.text : R.color.hint));
+			name.setTextSize(15.5f);
+			name.setTypeface(null, android.graphics.Typeface.BOLD);
+			name.setIncludeFontPadding(false);
+			name.setMaxLines(1);
+			name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+			col.addView(name);
 
-				// The coin. Tinted for an online machine, hollow for a
-				// sleeping one; the letter rides on top either way.
-				final int coin = dp(38);
-				android.widget.TextView av = new android.widget.TextView(MainActivity.this);
-				String nm = p.name == null || p.name.isEmpty() ? "?" : p.name;
-				av.setText(nm.substring(0, 1).toUpperCase());
-				av.setGravity(android.view.Gravity.CENTER);
-				av.setTextSize(16);
-				av.setTypeface(null, android.graphics.Typeface.BOLD);
-				av.setTextColor(getColor(on ? R.color.accentHi : R.color.hint));
-				android.graphics.drawable.GradientDrawable disc =
-						new android.graphics.drawable.GradientDrawable();
-				disc.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-				disc.setColor(getColor(on ? R.color.accentDim : R.color.hairline));
-				av.setBackground(disc);
-				row.addView(av, new android.widget.LinearLayout.LayoutParams(coin, coin));
+			// Online is a state worth a light, not a sentence: a small dot
+			// beside the word is read in one glance.
+			LinearLayout state = new LinearLayout(this);
+			state.setOrientation(LinearLayout.HORIZONTAL);
+			state.setGravity(Gravity.CENTER_VERTICAL);
+			state.setPadding(0, dp(3), 0, 0);
 
-				// Name and state. The name carries the weight; the state
-				// is a whisper under it, so a list of five machines is
-				// read by its names and checked by its states.
-				android.widget.LinearLayout col = new android.widget.LinearLayout(MainActivity.this);
-				col.setOrientation(android.widget.LinearLayout.VERTICAL);
+			View dot = new View(this);
+			android.graphics.drawable.GradientDrawable dotBg =
+					new android.graphics.drawable.GradientDrawable();
+			dotBg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+			dotBg.setColor(getColor(on ? R.color.ok : R.color.hint));
+			dot.setBackground(dotBg);
+			LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(5), dp(5));
+			dlp.rightMargin = dp(6);
+			state.addView(dot, dlp);
 
-				android.widget.TextView name = new android.widget.TextView(MainActivity.this);
-				name.setText(p.name);
-				name.setTextColor(getColor(on ? R.color.text : R.color.hint));
-				name.setTextSize(15.5f);
-				name.setTypeface(null, android.graphics.Typeface.BOLD);
-				name.setMaxLines(1);
-				name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-				col.addView(name);
+			TextView stateText = new TextView(this);
+			stateText.setText(on
+					? getString(R.string.peer_online)
+					: getString(R.string.peer_offline_label));
+			stateText.setTextColor(getColor(on ? R.color.text2 : R.color.hint));
+			stateText.setTextSize(11.5f);
+			stateText.setIncludeFontPadding(false);
+			state.addView(stateText);
+			col.addView(state);
 
-				android.widget.TextView sub = new android.widget.TextView(MainActivity.this);
-				sub.setText(on
-						? getString(R.string.peer_online).toLowerCase()
-						: getString(R.string.peer_offline_label));
-				sub.setTextColor(getColor(on ? R.color.ok : R.color.hint));
-				sub.setTextSize(11.5f);
-				sub.setPadding(0, dp(2), 0, 0);
-				col.addView(sub);
+			LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+					0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+			clp.leftMargin = dp(13);
+			clp.rightMargin = dp(8);
+			row.addView(col, clp);
 
-				android.widget.LinearLayout.LayoutParams colp =
-						new android.widget.LinearLayout.LayoutParams(0,
-								android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-				colp.setMargins(dp(14), 0, dp(10), 0);
-				row.addView(col, colp);
+			final android.widget.Switch sw = toggle(false);
+			sw.setChecked(picked[index] && on);
+			sw.setEnabled(on);
+			sw.setAlpha(on ? 1f : 0.5f);
+			sw.setThumbTintList(android.content.res.ColorStateList.valueOf(
+					getColor(picked[index] && on ? R.color.accent : R.color.thumbOff)));
+			sw.setOnCheckedChangeListener((b, checked) -> {
+				picked[index] = checked && on;
+				((android.widget.Switch) b).setThumbTintList(
+						android.content.res.ColorStateList.valueOf(
+								getColor(picked[index] ? R.color.accent : R.color.thumbOff)));
+			});
+			row.setOnClickListener(v -> {
+				if (on) {
+					sw.toggle();
+				}
+			});
+			row.addView(sw);
 
-				// The switch, tinted with the state it reports. A stock
-				// thumb is a grey coin that cannot be told from off; the
-				// accent is what is being conferred on the machine here.
-				final android.widget.Switch cb = toggle(false);
-				cb.setText(null);
-				cb.setBackground(null);
-				java.util.function.BiConsumer<android.widget.Switch, Boolean> paint
-						= (s, checkedNow) -> s.setThumbTintList(
-								android.content.res.ColorStateList.valueOf(getColor(
-										checkedNow ? R.color.accent : R.color.thumbOff)));
-				android.content.res.ColorStateList tint =
-						android.content.res.ColorStateList.valueOf(getColor(
-								(picked[i] && on) ? R.color.accent : R.color.thumbOff));
-				cb.setThumbTintList(tint);
-				cb.setEnabled(on);
-				cb.setAlpha(on ? 1f : 0.45f);
-				cb.setChecked(picked[i] && on);
-				cb.setOnClickListener(x -> {
-					if (!on) {
-						return;
-					}
-					cb.setChecked(!cb.isChecked());
-					picked[i] = cb.isChecked();
-					paint.accept(cb, cb.isChecked());
-					if (sendRef[0] != null) {
-						boolean any = false;
-						for (int k = 0; k < picked.length; k++) {
-							if (picked[k] && enabled[k]) {
-								any = true;
-								break;
-							}
-						}
-						sendRef[0].setTextColor(getColor(
-								any ? R.color.accent : R.color.hint));
-					}
-				});
-				row.setOnClickListener(v -> cb.callOnClick());
-				row.addView(cb);
-
-				// Reuse is nothing here: a dozen machines at the very
-				// most, and the rows are built fresh every time the
-				// dialog opens.
-				return row;
-			}
-		};
-
-		android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(
-				this, R.style.Theme_Share_Dialog)
-				// The title block carries the count of what is being
-				// shared, above the list: two lines, the command and the
-				// cargo, so the user knows which share this is before the
-				// devices are chosen.
-				.setCustomTitle(sheetTitle())
-				// The listener is required by the API, but a null one would
-				// dismiss the dialog on the first row tap. No-op keeps it open
-				// so more than one device can be chosen, which is the point of
-				// coming here from a share sheet.
-				.setAdapter(adapter, (d, which) -> { })
-				.setPositiveButton(R.string.send_files, (d, w) -> {
-					chosen.clear();
-					List<String> targets = new ArrayList<>();
-					for (int i = 0; i < ps.size(); i++) {
-						if (picked[i] && enabled[i]) {
-							chosen.add(ps.get(i).name);
-							// dispatch() takes addresses, not names. Passing the
-							// name makes api_send reject it as an invalid peer,
-							// so every share-sheet send failed while the in-app
-							// picker (which passes addresses) worked.
-							if (ps.get(i).ip != null && !ps.get(i).ip.isEmpty()) {
-								targets.add(ps.get(i).ip);
-							}
-						}
-					}
-					saveTargets();
-					refresh();
-					if (targets.isEmpty()) {
-						toast(getString(R.string.pick_a_device));
-						return;
-					}
-					dispatch(new ArrayList<>(pendingUris), targets);
-				})
-				.setNegativeButton(android.R.string.cancel, null)
-				.create();
-
-		dlg.show();
-
-		android.view.Window win = dlg.getWindow();
-		if (win != null) {
-			win.setBackgroundDrawableResource(R.drawable.dialog_bg);
-			// Deep enough that the page behind reads as "gone" and the
-			// sheet is the only lit thing on the screen: a share target
-			// is a decision, not a browse.
-			win.setDimAmount(0.62f);
+			list.addView(row);
 		}
 
-		// Material upper-cases its buttons; the rest of the app is sentence
-		// case, so a stock dialog reads as foreign in two small ways.
-		android.widget.Button pos = dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
-		android.widget.Button neg = dlg.getButton(android.app.AlertDialog.BUTTON_NEGATIVE);
-		if (pos != null) {
-			sendRef[0] = pos;
-			boolean any = false;
-			for (int k = 0; k < picked.length; k++) {
-				if (picked[k] && enabled[k]) {
-					any = true;
-					break;
+		ScrollView scroll = new ScrollView(this);
+		scroll.setVerticalScrollBarEnabled(false);
+		scroll.addView(list);
+		sheet.add(scroll, Math.min(ps.size() * 62 + 4, 356));
+
+		sheet.primary(getString(R.string.send_files), () -> {
+			chosen.clear();
+			List<String> targets = new ArrayList<>();
+			for (int i = 0; i < ps.size(); i++) {
+				if (picked[i] && ps.get(i).online) {
+					chosen.add(ps.get(i).name);
+					// dispatch() takes addresses, not names. Passing the name
+					// made api_send reject it as an invalid peer, so every
+					// share-sheet send failed while the in-app picker worked.
+					if (ps.get(i).ip != null && !ps.get(i).ip.isEmpty()) {
+						targets.add(ps.get(i).ip);
+					}
 				}
 			}
-			pos.setTextColor(getColor(any ? R.color.accent : R.color.hint));
-		}
-
-		for (android.widget.Button b : new android.widget.Button[]{pos, neg}) {
-			if (b != null) {
-				b.setAllCaps(false);
-				// The two buttons do not weigh the same: Send is the
-				// action this sheet exists for, Cancel is the way out.
-				// Same voice, different weight, so the eye lands right.
-				if (b != pos) {
-					b.setTextColor(getColor(R.color.text2));
-				}
-				b.setTextSize(15);
+			saveTargets();
+			refresh();
+			if (targets.isEmpty()) {
+				toast(getString(R.string.pick_a_device));
+				return;
 			}
-		}
-
-		// Colour the Send button from the row click handler below, NOT by
-		// installing a listener on the button. setOnClickListener replaces the
-		// one the dialog gave it, and the result was a Send button that
-		// recoloured itself and did nothing else -- the picker looked alive and
-		// silently sent nothing.
-
-		// android.R.id.alertTitle does not exist in the public SDK, so the
-		// title is reached by resource name instead. Absent on some OEM builds,
-		// hence the null check: this is polish, not something worth failing on.
-		android.view.View title = dlg.findViewById(
-				getResources().getIdentifier("alertTitle", "id", "android"));
-		if (title instanceof android.widget.TextView) {
-			android.widget.TextView t = (android.widget.TextView) title;
-			t.setTextColor(getColor(R.color.text));
-			t.setTextSize(19);
-			t.setTypeface(null, android.graphics.Typeface.BOLD);
-		}
-
-		android.widget.ListView lv = dlg.getListView();
-		if (lv != null) {
-			lv.setDivider(new android.graphics.drawable.ColorDrawable(getColor(R.color.divider)));
-			lv.setDividerHeight(dp(1));
-			lv.setSelector(new android.graphics.drawable.ColorDrawable(getColor(R.color.surfaceHi)));
-			lv.setBackgroundColor(android.graphics.Color.TRANSPARENT);
-		}
+			dispatch(new ArrayList<>(pendingUris), targets);
+		}).secondary(getString(android.R.string.cancel)).show();
 	}
 
 	/** One local root round-trip fills every panel; the network check follows. */
@@ -1870,47 +1677,56 @@ public class MainActivity extends Activity {
 		in.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
 		in.setTextColor(getColor(R.color.text));
 		in.setHintTextColor(getColor(R.color.hint));
-		in.setTextSize(16);
+		in.setTextSize(18);
+		in.setGravity(Gravity.CENTER);
 		in.setSingleLine(true);
-		in.setPadding(dp(14), 0, dp(14), 0);
+		in.setPadding(dp(16), 0, dp(16), 0);
 		in.setBackgroundResource(R.drawable.field);
+
+		final TextView error = new TextView(this);
+		error.setTextColor(getColor(R.color.err));
+		error.setTextSize(12.5f);
+		error.setIncludeFontPadding(false);
+		error.setPadding(dp(4), dp(9), dp(4), 0);
+		error.setVisibility(View.GONE);
+
 		LinearLayout box = new LinearLayout(this);
 		box.setOrientation(LinearLayout.VERTICAL);
-		box.setPadding(dp(24), dp(8), dp(24), 0);
 		box.addView(in, new LinearLayout.LayoutParams(
-				ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
+		box.addView(error);
 
-		alert()
-				.setTitle(title)
-				.setView(box)
-				.setPositiveButton(android.R.string.ok, (d, w) -> {
-					String v = in.getText().toString().trim();
-					int n;
-					try {
-						n = Integer.parseInt(v);
-					} catch (NumberFormatException e) {
-						toast(getString(R.string.failed, v));
-						return;
-					}
-					if (n < lo || n > hi) {
-						toast(getString(R.string.clip_keep_range));
-						return;
-					}
-					new Thread(() -> {
-						try {
-							onSet.set(n);
-							ui.post(() -> {
-								toast(getString(R.string.done));
-								clipboardSettingsChanged();
-							});
-						} catch (Exception e) {
-							ui.post(() -> toast(getString(R.string.failed,
-									String.valueOf(e.getMessage()))));
-						}
-					}).start();
-				})
-				.setNegativeButton(android.R.string.cancel, null)
-				.show();
+		final Sheet sheet = Sheet.card(this).title(title).add(box);
+
+		sheet.primaryKeep(getString(R.string.save), () -> {
+			String v = in.getText().toString().trim();
+			int n;
+			try {
+				n = Integer.parseInt(v);
+			} catch (NumberFormatException e) {
+				error.setText(getString(R.string.number_range, lo, hi));
+				error.setVisibility(View.VISIBLE);
+				return;
+			}
+			if (n < lo || n > hi) {
+				error.setText(getString(R.string.number_range, lo, hi));
+				error.setVisibility(View.VISIBLE);
+				return;
+			}
+			sheet.dismiss();
+			new Thread(() -> {
+				try {
+					onSet.set(n);
+					ui.post(() -> {
+						toast(getString(R.string.done));
+						clipboardSettingsChanged();
+					});
+				} catch (Exception e) {
+					ui.post(() -> toast(getString(R.string.failed,
+							String.valueOf(e.getMessage()))));
+				}
+			}).start();
+		}).secondary(getString(android.R.string.cancel)).show();
 	}
 
 	/**
@@ -1945,10 +1761,8 @@ public class MainActivity extends Activity {
 		for (int i = 0; i < options.length; i++) {
 			labels[i] = getString(R.string.clip_kept, options[i]);
 		}
-		alert()
-				.setTitle(R.string.clip_t_keep)
-				.setSingleChoiceItems(labels, indexOf(options, current), (d, which) -> {
-					d.dismiss();
+		Sheet.choice(this, getString(R.string.clip_t_keep),
+				labels, indexOf(options, current), which -> {
 					new Thread(() -> {
 						try {
 							Api.clipboardSet("max", String.valueOf(options[which]));
@@ -1961,9 +1775,7 @@ public class MainActivity extends Activity {
 									String.valueOf(e.getMessage()))));
 						}
 					}).start();
-				})
-				.setNegativeButton(android.R.string.cancel, null)
-				.show();
+				});
 	}
 
 	private static int indexOf(int[] a, int v) {
@@ -1977,12 +1789,9 @@ public class MainActivity extends Activity {
 
 	/** Delete everything, after asking. */
 	private void confirmClearClipboard() {
-		alert()
-				.setTitle(R.string.clip_clear)
-				.setMessage(R.string.clip_clear_confirm)
-				.setPositiveButton(R.string.clip_clear, (d, w) -> clearClipboard())
-				.setNegativeButton(android.R.string.cancel, null)
-				.show();
+		Sheet.confirm(this, getString(R.string.clip_clear),
+				getString(R.string.clip_clear_confirm),
+				getString(R.string.clip_clear), true, this::clearClipboard);
 	}
 
 	/**
@@ -2480,13 +2289,17 @@ public class MainActivity extends Activity {
 		col.addView(t);
 
 		// Subtitle: who copied it and when.
+		// The source never changes; the age does. Keeping them apart lets
+		// the clock tick repaint the age without rebuilding a single row.
+		String who = clipWho(e);
 		TextView sub = new TextView(this);
-		sub.setText(clipSource(e));
+		sub.setText(who + "  ·  " + clipTime(e.time));
 		sub.setTextColor(getColor(R.color.text2));
 		sub.setTextSize(12f);
 		sub.setPadding(0, dp(3), 0, 0);
 		sub.setIncludeFontPadding(false);
 		col.addView(sub);
+		clipStamps.add(new Object[] { sub, who, e.time });
 
 		row.addView(col, new LinearLayout.LayoutParams(0,
 				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -2533,34 +2346,22 @@ public class MainActivity extends Activity {
 
 	/** What a long press on an entry offers. */
 	private void clipRowMenu(ClipEntry e) {
-		alert()
-				.setTitle(clipShown(e))
-				.setItems(new CharSequence[] {
-						getString(R.string.clip_copy),
-						getString(R.string.clip_send_to),
-						getString(R.string.clip_delete),
-				}, (d, which) -> {
-					switch (which) {
-						case 0:
-							copyToClipboard(clipText(e));
-							break;
-						case 1:
-							showClipEntry(e);
-							break;
-						case 2:
-							confirmDeleteClip(e);
-							break;
-					}
-				})
-				.show();
+		BottomSheet sheet = new BottomSheet(this, clipShown(e));
+		sheet.action(R.drawable.ic_copy, getString(R.string.clip_copy), false,
+				() -> copyToClipboard(clipText(e)));
+		sheet.action(R.drawable.ic_send, getString(R.string.clip_send_to), false,
+				() -> showClipEntry(e));
+		sheet.action(R.drawable.ic_delete, getString(R.string.clip_delete), true,
+				() -> confirmDeleteClip(e));
+		sheet.cancel();
+		sheet.show();
 	}
 
 	/** Delete one entry, after asking. */
 	private void confirmDeleteClip(ClipEntry e) {
-		alert()
-				.setTitle(R.string.clip_delete)
-				.setMessage(R.string.clip_delete_confirm)
-				.setPositiveButton(R.string.clip_delete, (d, w) -> {
+		Sheet.confirm(this, getString(R.string.clip_delete),
+				getString(R.string.clip_delete_confirm),
+				getString(R.string.clip_delete), true, () -> {
 					new Thread(() -> {
 						try {
 							Api.clipboardDelete(e.id, e.time);
@@ -2573,9 +2374,7 @@ public class MainActivity extends Activity {
 									String.valueOf(ex.getMessage()))));
 						}
 					}).start();
-				})
-				.setNegativeButton(android.R.string.cancel, null)
-				.show();
+				});
 	}
 
 	/** Put some text on the clipboard. */
@@ -2634,11 +2433,27 @@ public class MainActivity extends Activity {
 		}
 	}
 
-	/** The in-progress transfer dialog, so a big file does not look like
-	 *  nothing is happening while `tailscale file cp` runs. */
-	private android.app.ProgressDialog sendProgress;
 	/** The entries the list is showing. */
 	private List<ClipEntry> clipEntries = new ArrayList<>();
+
+	/** Each painted "who · when" line, so the when can be refreshed where
+	 *  it stands. Rebuilding the list every minute would throw away the
+	 *  scroll position for a label that changed by one character. */
+	private final List<Object[]> clipStamps = new ArrayList<>();
+
+	private final Runnable clipClock = new Runnable() {
+		@Override public void run() {
+			for (Object[] o : clipStamps) {
+				TextView v = (TextView) o[0];
+				String who = (String) o[1];
+				long t = (Long) o[2];
+				if (t > 0) {
+					v.setText(who + "  ·  " + clipTime(t));
+				}
+			}
+			ui.postDelayed(this, 30_000);
+		}
+	};
 	/** Fetch bookkeeping. One fetch at a time: the root shell is a single
 	 *  serialized pipe, and three callers asking at once made each answer
 	 *  slower than the one before it. */
@@ -2728,6 +2543,7 @@ public class MainActivity extends Activity {
 
 		clipShown.clear();
 		clipShown.addAll(shown);
+		clipStamps.clear();
 		final int gen = ++clipRenderGen;
 		clipList.removeAllViews();
 		appendClipRows(shown, 0, gen);
@@ -2947,21 +2763,24 @@ public class MainActivity extends Activity {
 	}
 
 	/** Which app an entry came from, and when. */
-	private String clipSource(ClipEntry e) {
-		String who;
+	private String clipWho(ClipEntry e) {
 		if (e.fromPeer) {
-			who = getString(R.string.clip_from_peer);
-		} else if ("com.android.shell".equals(e.source)) {
+			return getString(R.string.clip_from_peer);
+		}
+		if ("com.android.shell".equals(e.source)) {
 			// The shell user is how the module reads and writes the
 			// clipboard, so this entry was put there by the module itself
 			// rather than by an app.
-			who = getString(R.string.clip_by_module);
-		} else if (e.source.isEmpty()) {
-			who = getString(R.string.clip_no_source);
-		} else {
-			who = appLabel(e.source);
+			return getString(R.string.clip_by_module);
 		}
-		return who + "  ·  " + clipTime(e.time);
+		if (e.source.isEmpty()) {
+			return getString(R.string.clip_no_source);
+		}
+		return appLabel(e.source);
+	}
+
+	private String clipSource(ClipEntry e) {
+		return clipWho(e) + "  ·  " + clipTime(e.time);
 	}
 
 	/** A time, said the way a person would. */
@@ -3081,12 +2900,10 @@ public class MainActivity extends Activity {
 						return;
 					}
 					String shown = body.length() > 240 ? body.substring(0, 240) + "…" : body;
-					alert()
-							.setTitle(R.string.clip_send_all)
-							.setMessage(getString(R.string.clip_send_confirm, shown))
-							.setPositiveButton(R.string.clip_send, (d, w) -> sendClipboardToAll())
-							.setNegativeButton(android.R.string.cancel, null)
-							.show();
+					Sheet.confirm(this, getString(R.string.clip_send_all),
+							getString(R.string.clip_send_confirm, shown),
+							getString(R.string.clip_send), false,
+							this::sendClipboardToAll);
 				});
 			} catch (Exception e) {
 				ui.post(() -> toast(getString(R.string.failed, String.valueOf(e.getMessage()))));
@@ -3111,11 +2928,12 @@ public class MainActivity extends Activity {
 						toast(getString(R.string.clip_now_empty));
 						return;
 					}
-					new android.app.AlertDialog.Builder(this, R.style.Theme_Share_Dialog)
-							.setTitle(getString(R.string.clip_now))
-							.setMessage(body)
-							.setPositiveButton(android.R.string.ok, null)
-							.show();
+					final String text = body;
+					Sheet s = Sheet.card(this).title(getString(R.string.clip_now));
+					s.message(text, true);
+					s.primary(getString(R.string.copy),
+							() -> copyToClipboard(text));
+					s.secondary(getString(android.R.string.cancel)).show();
 				});
 			} catch (Exception e) {
 				ui.post(() -> toast(getString(R.string.failed, String.valueOf(e.getMessage()))));
@@ -3139,12 +2957,23 @@ public class MainActivity extends Activity {
 		} else {
 			who = appLabel(e.source);
 		}
-		android.app.AlertDialog.Builder b =
-				new android.app.AlertDialog.Builder(this, R.style.Theme_Share_Dialog)
-						.setTitle(who.isEmpty() ? getString(R.string.clip_heading) : who)
-						.setMessage(body.isEmpty() ? getString(R.string.clip_now_empty) : body)
-						.setPositiveButton(android.R.string.ok, null);
-		b.show();
+		// A very long clip is shown shortened: laying out a hundred thousand
+		// characters is what makes a popup feel late on a busy phone. Copy
+		// still puts the whole thing on the clipboard.
+		String preview = body;
+		if (preview.length() > 12000) {
+			preview = preview.substring(0, 12000) + "\n…";
+		}
+		Sheet s = Sheet.card(this).title(
+				who.isEmpty() ? getString(R.string.clip_heading) : who);
+		s.message(body.isEmpty() ? getString(R.string.clip_now_empty) : preview, true);
+		if (!body.isEmpty()) {
+			s.primary(getString(R.string.copy), () -> copyToClipboard(body));
+			s.secondary(getString(android.R.string.cancel));
+		} else {
+			s.primary(getString(android.R.string.ok), null);
+		}
+		s.show();
 	}
 
 	/** Send whatever is on the clipboard to every device that is online. */
@@ -3492,7 +3321,6 @@ public class MainActivity extends Activity {
 		cb.setAlpha(up ? 1f : 0.4f);
 		cb.setThumbTintList(android.content.res.ColorStateList.valueOf(
 				getColor(up && chosen.contains(p.name) ? R.color.text : R.color.hint)));
-		row.addView(cb);
 
 		LinearLayout col = col();
 		TextView n = new TextView(this);
@@ -3536,8 +3364,12 @@ public class MainActivity extends Activity {
 		col.addView(meta);
 		row.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-		// A peer's address is worth keeping too, so it copies like one.
-		row.addView(iconButton(R.drawable.ic_copy, R.color.hint, R.string.copy, v -> copy(p.ip)));
+		// The switch is the selection, and it sits where a trailing control
+		// belongs: after the name, before the one-off send.
+		LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		slp.leftMargin = dp(4);
+		row.addView(cb, slp);
 
 		// Send straight to this one device without touching the selection.
 		// Disabled when the peer is offline: Taildrop would report success and
@@ -3719,15 +3551,9 @@ public class MainActivity extends Activity {
 	/** every file -> every chosen peer, reporting partial failures. */
 	private void dispatch(List<Uri> uris, List<String> to) {
 		// One send per device, enforced here rather than trusted from the
-		// caller.
-		//
-		// This made a copy of the target list and then iterated the original,
-		// so the copy did nothing: any repeated address in `to` sent the same
-		// file to the same machine that many times. The addresses arrive
-		// already de-duplicated from currentTargets(), but that is a
-		// convention three call sites have to remember, and a file delivered
-		// three times cannot be undone at the receiving end -- it simply
-		// turns into three files and three notifications there.
+		// caller. A duplicate address used to send the same file to the
+		// same machine that many times, and a file delivered three times
+		// cannot be undone at the other end.
 		final List<String> targets = new ArrayList<>();
 		for (String p : to) {
 			if (p != null && !p.isEmpty() && !targets.contains(p)) {
@@ -3738,20 +3564,14 @@ public class MainActivity extends Activity {
 			toast(getString(R.string.pick_a_device));
 			return;
 		}
-		// Non-dismissible spinner while transfers run. No cycling dots:
-		// one steady state that says work is happening, then a "Sent"
-		// confirmation when it is done.
-		ui.post(() -> {
-			sendProgress = new android.app.ProgressDialog(this,
-					R.style.Theme_Share_Dialog);
-			sendProgress.setTitle(getString(R.string.send_progress_title));
-			sendProgress.setMessage(getString(R.string.send_progress_sending));
-			sendProgress.setProgressStyle(
-					android.app.ProgressDialog.STYLE_SPINNER);
-			sendProgress.setIndeterminate(true);
-			sendProgress.setCancelable(false);
-			sendProgress.show();
-		});
+
+		// One popup for the whole run. It breathes while the files move,
+		// turns into a check when they land and leaves on its own; a failed
+		// run stays until it has been read. The dialog is the progress: no
+		// second toast saying what just happened.
+		final TransferDialog progress = new TransferDialog(this,
+				getString(R.string.send_progress_staging));
+
 		new Thread(() -> {
 			try {
 				java.io.File dir = new java.io.File(getCacheDir(), "send");
@@ -3767,18 +3587,33 @@ public class MainActivity extends Activity {
 						Log.w(TAG, "could not stage " + u + ": " + e);
 					}
 				}
+
+				if (files.isEmpty()) {
+					ui.post(() -> progress.failure(
+							getString(R.string.send_fail_title),
+							getString(R.string.send_no_files), null, null));
+					return;
+				}
+
+				final int total = targets.size() * files.size();
+				int done = 0;
 				int ok = 0;
 				StringBuilder problems = new StringBuilder();
+
 				for (String peer : targets) {
 					String peerName = null;
-					for (Map.Entry<String,String> e : peers.entrySet()) {
+					for (Map.Entry<String, String> e : peers.entrySet()) {
 						if (peer.equals(e.getValue())) {
 							peerName = e.getKey();
 							break;
 						}
 					}
+					final String label = peerName == null ? peer : peerName;
 					for (java.io.File f : files) {
-						final String fn = peerName == null ? peer : peerName;
+						final int n = ++done;
+						ui.post(() -> progress.subtitle(getString(
+								R.string.send_progress_current, n, total,
+								f.getName(), label)));
 						try {
 							Api.send(peer, f.getAbsolutePath());
 							ok++;
@@ -3786,37 +3621,30 @@ public class MainActivity extends Activity {
 							// Root was refused part way through a run. It is not
 							// a crash, but a lost file; the report below says
 							// so, and the user has the permission screen for
-							// the next attempt. Throwing it out of a bare
-							// thread used to kill the whole app -- after the
-							// share sheet had closed, mid-send, silently.
+							// the next attempt.
 							failed++;
-							problems.append(peer).append(": ")
+							problems.append(label).append(": ")
 									.append(getString(R.string.need_root_short)).append('\n');
 						} catch (Exception e) {
 							failed++;
-							if (problems.length() < 300) {
-								problems.append(peer).append(": ").append(e.getMessage()).append('\n');
+							if (problems.length() < 320) {
+								problems.append(label).append(": ")
+										.append(e.getMessage()).append('\n');
 							}
 						}
 					}
 				}
-				ui.post(() -> {
-					if (sendProgress != null) {
-						sendProgress.dismiss();
-						sendProgress = null;
-					}
-				});
-				final int fOk = ok, fFailed = failed;
+
+				final int fOk = ok, fFailed = failed, fTotal = total;
 				final String p = problems.toString().trim();
 				ui.post(() -> {
 					if (fFailed == 0) {
-						toast(getString(R.string.sent_ok, fOk, targets.size()));
+						progress.success(getString(R.string.sent_summary,
+								fOk, targets.size()));
 					} else {
-						alert()
-								.setTitle(R.string.send_failed)
-								.setMessage(getString(R.string.sent_partial, fOk, fFailed) + "\n\n" + p)
-								.setPositiveButton(android.R.string.ok, null)
-								.show();
+						progress.failure(getString(R.string.send_fail_title),
+								getString(R.string.send_fail_sub, fOk, fTotal),
+								p, null);
 					}
 					// Re-read so the staged-items note clears once it is sent.
 					refresh();
@@ -3827,7 +3655,9 @@ public class MainActivity extends Activity {
 				// take the process down, and with it the share the user was
 				// still waiting on.
 				Log.w(TAG, "send run failed", t);
-				ui.post(() -> toast(String.valueOf(t.getMessage())));
+				ui.post(() -> progress.failure(
+						getString(R.string.send_fail_title),
+						String.valueOf(t.getMessage()), null, null));
 			}
 		}).start();
 	}
@@ -3877,36 +3707,31 @@ public class MainActivity extends Activity {
 			checked = 0;
 		}
 
-		new android.app.AlertDialog.Builder(this, R.style.Theme_Share_Dialog)
-				.setTitle(getString(R.string.t_use_exit))
-				.setSingleChoiceItems(labels.toArray(new CharSequence[0]), checked,
-						(d, which) -> {
-							d.dismiss();
-							final String value = values.get(which);
-							if (value.equals(cur)) {
-								return;
+		Sheet.choice(this, getString(R.string.t_use_exit),
+				labels.toArray(new CharSequence[0]), checked, which -> {
+					final String value = values.get(which);
+					if (value.equals(cur)) {
+						return;
+					}
+					new Thread(() -> {
+						String err = null;
+						try {
+							Api.set("exit-node", value);
+						} catch (Exception e) {
+							err = String.valueOf(e.getMessage());
+						}
+						final String e2 = err;
+						ui.post(() -> {
+							if (e2 == null) {
+								toast(getString(R.string.exit_node_set,
+										"none".equals(value)
+												? getString(R.string.exit_node_none)
+												: labels.get(values.indexOf(value))));
 							}
-							new Thread(() -> {
-								String err = null;
-								try {
-									Api.set("exit-node", value);
-								} catch (Exception e) {
-									err = String.valueOf(e.getMessage());
-								}
-								final String e2 = err;
-								ui.post(() -> {
-									if (e2 == null) {
-										toast(getString(R.string.exit_node_set,
-												"none".equals(value)
-														? getString(R.string.exit_node_none)
-														: labels.get(values.indexOf(value))));
-									}
-									refresh();
-								});
-							}).start();
-						})
-				.setNegativeButton(android.R.string.cancel, null)
-				.show();
+							refresh();
+						});
+					}).start();
+				});
 	}
 
 	private void buildSettings(JSONObject st) {
@@ -4230,10 +4055,9 @@ public class MainActivity extends Activity {
 	}
 
 	private void rollback() {
-		alert()
-				.setTitle(R.string.rollback)
-				.setMessage(R.string.rollback_confirm)
-				.setPositiveButton(android.R.string.ok, (d, w) -> {
+		Sheet.confirm(this, getString(R.string.rollback),
+				getString(R.string.rollback_confirm),
+				getString(R.string.rollback), true, () -> {
 					new Thread(() -> {
 						try {
 							ui.post(() -> toast(getString(R.string.done)));
@@ -4244,9 +4068,7 @@ public class MainActivity extends Activity {
 									String.valueOf(e.getMessage()))));
 						}
 					}).start();
-				})
-				.setNegativeButton(android.R.string.cancel, null)
-				.show();
+				});
 	}
 
 	/** Log viewer: monospace, colour-coded by severity, filterable, copyable. */
@@ -4262,75 +4084,40 @@ public class MainActivity extends Activity {
 	}
 
 	private void logDialog(String log) {
-		LinearLayout root = new LinearLayout(this);
-		root.setOrientation(LinearLayout.VERTICAL);
+		final String[] lines = log.split("\n");
+		final boolean[] problemsOnly = {false};
 
-		// ── header ──
-		LinearLayout head = new LinearLayout(this);
-		head.setOrientation(LinearLayout.HORIZONTAL);
-		head.setGravity(Gravity.CENTER_VERTICAL);
-		head.setPadding(dp(20), dp(18), dp(12), dp(12));
+		final Sheet sheet = Sheet.card(this).title(getString(R.string.logs));
 
-		LinearLayout titles = new LinearLayout(this);
-		titles.setOrientation(LinearLayout.VERTICAL);
-		TextView t = new TextView(this);
-		t.setText(R.string.logs);
-		t.setTextColor(getColor(R.color.text));
-		t.setTextSize(17);
-		t.setTypeface(null, android.graphics.Typeface.BOLD);
-		titles.addView(t);
-		final TextView count = new TextView(this);
-		count.setTextColor(getColor(R.color.hint));
-		count.setTextSize(12);
-		titles.addView(count);
-		head.addView(titles, new LinearLayout.LayoutParams(0,
-				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		final TextView filter = chip(getString(R.string.filter_problems));
+		TextView reload = chip(getString(R.string.refresh));
+		LinearLayout chips = new LinearLayout(this);
+		chips.setOrientation(LinearLayout.HORIZONTAL);
+		chips.setGravity(Gravity.CENTER_VERTICAL);
+		chips.addView(filter);
+		View gap = new View(this);
+		chips.addView(gap, new LinearLayout.LayoutParams(0, 1, 1f));
+		chips.addView(reload);
+		sheet.add(chips);
 
-		final TextView filter = new TextView(this);
-		filter.setText(R.string.filter_all);
-		filter.setTextColor(getColor(R.color.text2));
-		filter.setTextSize(13);
-		filter.setGravity(Gravity.CENTER);
-		filter.setPadding(dp(14), dp(8), dp(14), dp(8));
-		head.addView(filter);
-		root.addView(head);
-
-		// ── body ──
-		android.widget.ScrollView scroll = new android.widget.ScrollView(this);
-		scroll.setPadding(dp(20), 0, dp(20), 0);
+		final ScrollView scroll = new ScrollView(this);
 		scroll.setHorizontalScrollBarEnabled(false);
-		TextView body = new TextView(this);
+		scroll.setVerticalScrollBarEnabled(false);
+		final TextView body = new TextView(this);
 		body.setTextSize(11);
 		body.setTextColor(getColor(R.color.text2));
 		body.setTypeface(android.graphics.Typeface.MONOSPACE);
 		body.setLineSpacing(dp(3), 1f);
-		body.setPadding(0, dp(4), 0, dp(12));
+		body.setPadding(dp(14), dp(12), dp(14), dp(12));
+		body.setBackgroundResource(R.drawable.field);
 		scroll.addView(body, new ViewGroup.LayoutParams(
 				ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-		root.addView(scroll, new LinearLayout.LayoutParams(
-				ViewGroup.LayoutParams.MATCH_PARENT, dp(380)));
-
-		// ── footer ──
-		LinearLayout foot = new LinearLayout(this);
-		foot.setOrientation(LinearLayout.HORIZONTAL);
-		foot.setPadding(dp(12), dp(4), dp(12), dp(12));
-		TextView copy = footButton(R.string.copy);
-		TextView reload = footButton(R.string.refresh);
-		TextView close = footButton(R.string.close);
-		foot.addView(copy, new LinearLayout.LayoutParams(0, dp(44), 1));
-		foot.addView(reload, new LinearLayout.LayoutParams(0, dp(44), 1));
-		foot.addView(close, new LinearLayout.LayoutParams(0, dp(44), 1));
-		root.addView(foot);
-
-		final AlertDialog d = alert().setView(root).create();
-		final String[] lines = log.split("\n");
-		final boolean[] problemsOnly = {false};
+		sheet.add(scroll, 380);
 
 		Runnable paint = () -> {
-			CharSequence out = paintLog(lines, problemsOnly[0]);
-			body.setText(out);
+			body.setText(paintLog(lines, problemsOnly[0]));
 			int shown = problemsOnly[0] ? countProblems(lines) : lines.length;
-			count.setText(getString(R.string.log_lines, shown));
+			sheet.subtitle(getString(R.string.log_lines, shown));
 			filter.setText(problemsOnly[0] ? R.string.filter_all : R.string.filter_problems);
 			scroll.post(() -> scroll.fullScroll(View.FOCUS_UP));
 		};
@@ -4339,33 +4126,41 @@ public class MainActivity extends Activity {
 			problemsOnly[0] = !problemsOnly[0];
 			paint.run();
 		});
-		copy.setOnClickListener(v -> {
-			android.content.ClipboardManager cm = (android.content.ClipboardManager)
-					getSystemService(CLIPBOARD_SERVICE);
+		reload.setOnClickListener(v -> {
+			sheet.dismiss();
+			showLogs();
+		});
+		sheet.primary(getString(R.string.copy), () -> {
+			android.content.ClipboardManager cm =
+					(android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
 			if (cm != null) {
 				cm.setPrimaryClip(android.content.ClipData.newPlainText("tailscale",
 						String.join("\n", lines)));
 				toast(getString(R.string.log_copied));
 			}
 		});
-		reload.setOnClickListener(v -> {
-			d.dismiss();
-			showLogs();
-		});
-		close.setOnClickListener(v -> d.dismiss());
+		sheet.secondary(getString(R.string.close));
 
 		paint.run();
-		d.show();
+		sheet.show();
 	}
 
-	private TextView footButton(int label) {
+	/** A small pill button used inside a dialog body. */
+	private TextView chip(CharSequence label) {
 		TextView b = new TextView(this);
 		b.setText(label);
-		b.setTextColor(getColor(R.color.text));
-		b.setTextSize(14);
+		b.setTextColor(getColor(R.color.accent));
+		b.setTextSize(12.5f);
+		b.setTypeface(null, android.graphics.Typeface.BOLD);
+		b.setIncludeFontPadding(false);
 		b.setGravity(Gravity.CENTER);
+		b.setPadding(dp(14), dp(8), dp(14), dp(8));
+		android.graphics.drawable.GradientDrawable g =
+				new android.graphics.drawable.GradientDrawable();
+		g.setCornerRadius(dp(999));
+		g.setColor(getColor(R.color.accentDim));
+		b.setBackground(g);
 		b.setClickable(true);
-		b.setBackgroundResource(R.drawable.row_press);
 		return b;
 	}
 
@@ -4443,12 +4238,9 @@ public class MainActivity extends Activity {
 					if (!r.optBoolean("ok", true)) {
 						// Silent failure is worse than none: say what went wrong.
 						String why = r.optString("raw", "");
-						alert()
-								.setTitle(R.string.sign_in)
-								.setMessage(why.trim().isEmpty()
-										? getString(R.string.no_login_url) : why.trim())
-								.setPositiveButton(android.R.string.ok, null)
-								.show();
+						Sheet.info(this, getString(R.string.sign_in),
+								why.trim().isEmpty()
+										? getString(R.string.no_login_url) : why.trim());
 						return;
 					}
 					if (r.optBoolean("alreadyLoggedIn", false)) {
@@ -4459,13 +4251,10 @@ public class MainActivity extends Activity {
 					String url = r.optString("url", "");
 					if (url.isEmpty()) {
 						String raw = r.optString("raw", "").trim();
-						alert()
-								.setTitle(R.string.sign_in)
-								.setMessage(raw.isEmpty()
+						Sheet.info(this, getString(R.string.sign_in),
+								raw.isEmpty()
 										? getString(R.string.no_login_url)
-										: raw)
-								.setPositiveButton(android.R.string.ok, null)
-								.show();
+										: raw);
 						return;
 					}
 					open(url);
@@ -4488,16 +4277,17 @@ public class MainActivity extends Activity {
 			setWirelessAdb(false);
 			return;
 		}
-		alert()
-				.setTitle(R.string.wireless_adb_switch)
-				.setMessage(R.string.wireless_adb_confirm)
-				.setPositiveButton(R.string.wireless_adb_turn_on, (d, w) -> setWirelessAdb(true))
-				.setNegativeButton(android.R.string.cancel, (d, w) -> {
-					if (status != null) {
-						render(status);
-					}
-				})
-				.show();
+		Sheet s = Sheet.card(this)
+				.title(getString(R.string.wireless_adb_switch))
+				.message(getString(R.string.wireless_adb_confirm));
+		s.primary(getString(R.string.wireless_adb_turn_on),
+				() -> setWirelessAdb(true));
+		s.secondary(getString(android.R.string.cancel), () -> {
+			if (status != null) {
+				render(status);
+			}
+		});
+		s.show();
 	}
 
 	private void setWirelessAdb(boolean on) {
@@ -4540,10 +4330,9 @@ public class MainActivity extends Activity {
 	}
 
 	private void confirmSignOut() {
-		alert()
-				.setTitle(R.string.sign_out)
-				.setMessage(R.string.sign_out_confirm)
-				.setPositiveButton(R.string.sign_out, (d, w) -> {
+		Sheet.confirm(this, getString(R.string.sign_out),
+				getString(R.string.sign_out_confirm),
+				getString(R.string.sign_out), true, () -> {
 					new Thread(() -> {
 						try {
 							Api.logout();
@@ -4556,9 +4345,7 @@ public class MainActivity extends Activity {
 									String.valueOf(e.getMessage()))));
 						}
 					}).start();
-				})
-				.setNegativeButton(android.R.string.cancel, null)
-				.show();
+				});
 	}
 
 	/**
@@ -4844,7 +4631,7 @@ public class MainActivity extends Activity {
 	}
 
 	private void toast(String msg) {
-		Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+		Snack.show(this, msg);
 	}
 
 	private int dp(int v) {

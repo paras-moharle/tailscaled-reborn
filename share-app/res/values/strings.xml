@@ -7,6 +7,8 @@
 	<string name="checking">Checking…</string>
 	<string name="working">Working…</string>
 	<string name="done">Done</string>
+	<string name="save">Save</string>
+	<string name="number_range">Enter a whole number between %1$d and %2$d.</string>
 	<string name="failed">Failed: %1$s</string>
 	<string name="copied">%1$s copied</string>
 
@@ -83,13 +85,16 @@
 	<string name="no_peers_short">No devices online</string>
 	<string name="shared_n">%1$d item(s) ready — tick the devices above, then send.</string>
 	<string name="sending">Sending…</string>
-	<string name="sent_ok">✓ Sent %1$d file(s) to %2$d device(s)</string>
 	<string name="sent_partial">%1$d delivered, %2$d failed</string>
 	<string name="send_progress_title">Sending</string>
 	<string name="send_progress_sending">Sending</string>
-	<string name="send_done">✓ Sent</string>
-	<string name="send_progress_starting">Starting transfer…</string>
-	<string name="send_progress_file">%1$s → %2$s  %3$s%% (%4$s of %5$s, %6$s KB)</string>
+	<string name="send_done">Sent</string>
+	<string name="send_progress_staging">Preparing…</string>
+	<string name="send_progress_current">%1$d of %2$d  ·  %3$s → %4$s</string>
+	<string name="sent_summary">%1$d file(s) to %2$d device(s)</string>
+	<string name="send_fail_title">Could not send</string>
+	<string name="send_fail_sub">%1$d of %2$d files delivered</string>
+	<string name="send_no_files">No file could be read. Try picking it again.</string>
 	<string name="send_failed">Send failed</string>
 	<string name="no_picker">No file picker available</string>
 

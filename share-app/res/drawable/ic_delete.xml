@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Delete: a bin with a lid and two ribs.
+
+     Drawn open, not filled, to match the other icons in the app. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+	android:width="24dp" android:height="24dp"
+	android:viewportWidth="24" android:viewportHeight="24">
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+		android:strokeLineCap="round" android:strokeLineJoin="round"
+		android:fillColor="#00000000"
+		android:pathData="M4.5,6.5 L19.5,6.5" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+		android:strokeLineCap="round" android:strokeLineJoin="round"
+		android:fillColor="#00000000"
+		android:pathData="M9.2,6.5 L9.2,4.2 L14.8,4.2 L14.8,6.5" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.7"
+		android:strokeLineCap="round" android:strokeLineJoin="round"
+		android:fillColor="#00000000"
+		android:pathData="M6.4,6.5 L7.3,20 L16.7,20 L17.6,6.5" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.5"
+		android:strokeLineCap="round" android:strokeLineJoin="round"
+		android:fillColor="#00000000"
+		android:pathData="M10.3,10.2 L10.6,16.3" />
+	<path android:strokeColor="#FFECEFF3" android:strokeWidth="1.5"
+		android:strokeLineCap="round" android:strokeLineJoin="round"
+		android:fillColor="#00000000"
+		android:pathData="M13.7,10.2 L13.4,16.3" />
+</vector>
