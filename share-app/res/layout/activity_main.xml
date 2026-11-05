@@ -159,59 +159,6 @@
 				android:paddingBottom="96dp" />
 		</ScrollView>
 
-		<ScrollView
-			android:id="@+id/scrollClip"
-			android:layout_width="match_parent"
-			android:layout_height="match_parent"
-			android:clipToPadding="false"
-			android:scrollbars="none"
-			android:visibility="gone">
-
-			<LinearLayout
-				android:id="@+id/pClip"
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:orientation="vertical"
-				android:paddingStart="16dp"
-				android:paddingEnd="16dp"
-				android:paddingBottom="96dp" />
-		</ScrollView>
-
-		<!-- The two actions this screen has, floating over the list.
-
-		     The list is the point of the screen, so the buttons are moved
-		     out of the flow and into the corner. They are hidden on the
-		     other tabs. -->
-		<LinearLayout
-			android:id="@+id/clipActions"
-			android:layout_width="wrap_content"
-			android:layout_height="wrap_content"
-			android:layout_gravity="bottom|end"
-			android:orientation="vertical"
-			android:gravity="end"
-			android:layout_marginEnd="18dp"
-			android:layout_marginBottom="18dp"
-			android:visibility="gone">
-
-			<ImageView
-				android:id="@+id/clipNowFab"
-				android:layout_width="50dp"
-				android:layout_height="50dp"
-				android:background="@drawable/fab_secondary"
-				android:padding="13dp"
-				android:src="@drawable/ic_clip"
-				android:contentDescription="@string/clip_now" />
-
-			<ImageView
-				android:id="@+id/clipSendFab"
-				android:layout_width="56dp"
-				android:layout_height="56dp"
-				android:layout_marginTop="12dp"
-				android:background="@drawable/fab"
-				android:padding="15dp"
-				android:src="@drawable/ic_send"
-				android:contentDescription="@string/clip_send_all" />
-		</LinearLayout>
 	</FrameLayout>
 
 	<!-- ── nav: a floating bar, with the selected tab marked ──
@@ -323,34 +270,5 @@
 				android:text="@string/nav_system" />
 		</LinearLayout>
 
-		<LinearLayout
-			android:id="@+id/navClip"
-			style="@style/Nav">
-
-			<FrameLayout
-				style="@style/NavPill"
-				android:background="@drawable/nav_pill_ripple"
-				android:clickable="false"
-				android:focusable="false">
-
-				<View
-					android:id="@+id/navPill"
-					android:layout_width="match_parent"
-					android:layout_height="match_parent"
-					android:background="@drawable/nav_pill"
-					android:visibility="invisible" />
-
-				<ImageView
-					android:id="@+id/navIcon"
-					style="@style/NavIcon"
-					android:layout_gravity="center"
-					android:src="@drawable/ic_clip" />
-			</FrameLayout>
-
-			<TextView
-				android:id="@+id/navLabel"
-				style="@style/NavLabel"
-				android:text="@string/nav_clip" />
-		</LinearLayout>
 	</LinearLayout>
 </LinearLayout>

@@ -15,55 +15,6 @@
 	<string name="nav_send">Send</string>
 	<string name="nav_settings">Settings</string>
 	<string name="nav_system">System</string>
-	<string name="nav_clip">Clip</string>
-
-	<!-- clipboard -->
-	<string name="clip_heading">Clipboard</string>
-	<string name="clip_watching">Watching the clipboard</string>
-	<string name="clip_watching_off">The clipboard watcher is not running</string>
-	<string name="clip_empty">Nothing copied yet. Anything you copy appears here.</string>
-	<string name="clip_empty_title">Nothing copied yet</string>
-	<string name="clip_empty_body">Anything you copy appears here.</string>
-	<string name="clip_load_failed_title">Could not load clips</string>
-	<string name="clip_load_failed_body">The clipboard history cannot be read. Try again.</string>
-	<string name="clip_retry">Try again</string>
-	<string name="clip_cap">Showing the newest %1$s entries. Search to reach older ones.</string>
-	<string name="clip_send_all">Send the clipboard to every online device</string>
-	<string name="clip_now">Clipboard right now</string>
-	<string name="clip_now_empty">The clipboard is empty</string>
-	<string name="clip_search_hint">Search the history</string>
-	<string name="clip_clear">Clear the history</string>
-	<string name="clip_copied">Copied to the clipboard</string>
-	<string name="clip_sent">Sent to %1$s</string>
-	<string name="clip_from_peer">from a peer</string>
-	<string name="clip_no_source">unknown app</string>
-	<string name="clip_by_module">TailBridge</string>
-	<string name="clip_send_to">Send to…</string>
-	<string name="clip_copy">Copy</string>
-	<string name="clip_entry_count">%1$d entries</string>
-	<string name="clip_just_now">just now</string>
-	<string name="clip_send">Send</string>
-	<string name="clip_send_confirm">This is what will be sent to every online device:\n\n%1$s</string>
-
-	<!-- clipboard settings -->
-	<string name="clip_settings">Clipboard</string>
-	<string name="clip_t_watch">Watch the clipboard</string>
-	<string name="clip_d_watch">Record what you copy, and where it came from</string>
-	<string name="clip_recording">Recording</string>
-	<string name="clip_star">Star</string>
-	<string name="clip_unstar">Unstar</string>
-	<string name="clip_starred_only">Show only the starred entries</string>
-	<string name="clip_delete">Delete</string>
-	<string name="clip_delete_confirm">Delete this entry?</string>
-	<string name="clip_needs_root">Needs root — Android only lets a system process read the clipboard, so TailBridge uses a hidden API through su. It keeps recording whether or not the daemon is running.</string>
-	<string name="clip_t_keep">How much to keep</string>
-	<string name="clip_d_keep">Older entries are dropped first</string>
-	<string name="clip_keep_range">Between 10 and 50,000 entries</string>
-	<string name="clip_t_days">How long to keep</string>
-	<string name="clip_d_days">Entries older than this are dropped</string>
-	<string name="clip_kept_days">%1$d days</string>
-	<string name="clip_clear_confirm">Delete every recorded copy?</string>
-	<string name="clip_kept">%1$d entries kept</string>
 
 	<string name="connected">Connected</string>
 	<string name="stopped">Stopped</string>
