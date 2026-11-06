@@ -331,6 +331,20 @@ public final class Sheet {
 		return this;
 	}
 
+	/**
+	 * A card the user cannot dismiss by accident.
+	 *
+	 * <p>Used while something is already in motion. Tapping beside a
+	 * transfer card used to close it while the files kept moving, so the
+	 * popup disappeared and the result was never shown. A locked card is
+	 * answered by its own buttons and by nothing else.
+	 */
+	public Sheet locked() {
+		d.setCanceledOnTouchOutside(false);
+		d.setCancelable(false);
+		return this;
+	}
+
 	private void updateHead() {
 		head.setVisibility(title.getVisibility() == View.VISIBLE
 				|| subtitle.getVisibility() == View.VISIBLE

@@ -48,9 +48,6 @@
 
 	<!-- Status only. -->
 	<color name="ok">#FF3DDC84</color>
-	<color name="okDim">#333DDC84</color>
 	<color name="warn">#FFFFB020</color>
-	<color name="warnDim">#33FFB020</color>
 	<color name="err">#FFFF5D5D</color>
-	<color name="errDim">#33FF5D5D</color>
 </resources>

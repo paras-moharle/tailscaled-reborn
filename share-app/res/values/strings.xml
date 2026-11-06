@@ -7,8 +7,6 @@
 	<string name="checking">Checking…</string>
 	<string name="working">Working…</string>
 	<string name="done">Done</string>
-	<string name="save">Save</string>
-	<string name="number_range">Enter a whole number between %1$d and %2$d.</string>
 	<string name="failed">Failed: %1$s</string>
 	<string name="copied">%1$s copied</string>
 
@@ -28,17 +26,17 @@
 	<string name="send_to_n">Send to %1$d devices</string>
 	<string name="send">Send</string>
 	<string name="exit_node_suffix">exit node</string>
-<string name="exit_node_offer">exit node on offer</string>
+	<string name="exit_node_offer">exit node on offer</string>
 	<string name="choose_devices">Send to</string>
 	<string name="pick_a_device">Pick a device first</string>
 	<string name="nothing_picked">No file was selected</string>
-	<string name="no_peers">No devices online. Sign in from the System tab first.</string>
+	<string name="select_all">Select all</string>
+	<string name="select_none">Select none</string>
+	<string name="pending_ready">%1$d file(s) ready to send</string>
+	<string name="pending_hint">Pick a device, then send.</string>
+	<string name="clear">Clear</string>
 	<string name="no_peers_short">No devices online</string>
-	<string name="shared_n">%1$d item(s) ready — tick the devices above, then send.</string>
-	<string name="sending">Sending…</string>
-	<string name="sent_partial">%1$d delivered, %2$d failed</string>
 	<string name="send_progress_title">Sending</string>
-	<string name="send_progress_sending">Sending</string>
 	<string name="send_done">Sent</string>
 	<string name="send_progress_staging">Preparing…</string>
 	<string name="send_progress_current">%1$d of %2$d  ·  %3$s → %4$s</string>
@@ -46,7 +44,6 @@
 	<string name="send_fail_title">Could not send</string>
 	<string name="send_fail_sub">%1$d of %2$d files delivered</string>
 	<string name="send_no_files">No file could be read. Try picking it again.</string>
-	<string name="send_failed">Send failed</string>
 	<string name="no_picker">No file picker available</string>
 
 	<!-- home -->
@@ -67,16 +64,9 @@
 	<string name="tailnet">Tailnet</string>
 	<string name="services">Services</string>
 	<string name="t_accept_dns">Accept DNS</string>
-	<string name="d_accept_dns">Use tailnet DNS names</string>
 	<string name="t_accept_routes">Accept routes</string>
-	<string name="d_accept_routes">Follow subnet routes from peers</string>
 	<string name="t_shields_up">Shields up</string>
-	<string name="d_shields_up">Block incoming connections</string>
 	<string name="t_ssh">Tailscale SSH</string>
-	<string name="d_ssh">Let tailnet members SSH in</string>
-	<string name="d_webclient">Serve the admin UI on this device</string>
-	<string name="d_adv_exit">Share this device\'s internet</string>
-	<string name="d_snat">Masquerade subnet traffic to this device</string>
 	<string name="hostname">Device name</string>
 	<string name="hostname_hint">Device name</string>
 	<string name="apply">Apply</string>
@@ -85,7 +75,6 @@
 
 	<!-- system -->
 	<string name="daemon">Daemon</string>
-	<string name="stop">Stop</string>
 	<string name="restart">Restart daemon</string>
 	<string name="service">Run tailscaled</string>
 	<string name="service_sub">Start or stop the Tailscale daemon</string>
@@ -108,16 +97,12 @@
 	<string name="check_updates">Check for updates</string>
 	<string name="install_update">Update to %1$s</string>
 	<string name="update_available">%1$s is available</string>
-	<string name="receive_files">Receive files</string>
-	<string name="receive_files_sub">Move what Taildrop received into Downloads/Tailscale</string>
-	<string name="received_n">Received %1$d file(s)</string>
 	<string name="update_check_hint">Look for a newer tailscaled</string>
 	<string name="supervisor">Supervisor</string>
 	<string name="supervisor_running">running — restarts the daemon if it dies</string>
 	<string name="supervisor_stopped">not running</string>
 	<string name="link_direct">direct</string>
 	<string name="link_relay">relay %1$s</string>
-	<string name="link_offline">offline — connect to internet</string>
 	<string name="link_none">not connected</string>
 	<string name="up_to_date">Already on the latest version (%1$s)</string>
 	<string name="installing_update">Installing tailscaled %1$s\u2026</string>
@@ -139,12 +124,10 @@
 
 	<!-- root -->
 	<string name="need_root_short">Root needed</string>
-	<string name="need_root">TailBridge talks to the tailscaled daemon in the Tailscale module, which lives in a root-only directory, so TailBridge needs root permission.</string>
 	<string name="grant_root">Grant root permission</string>
 	<string name="grant_root_title">Grant root\npermission</string>
 	<string name="grant_root_body">TailBridge talks to the tailscaled daemon, which lives in a root-only directory. Your root manager has to be told to trust this app.</string>
 	<string name="grant_root_back">Then come back here \u2014 TailBridge checks again on its own.</string>
-		<string name="app_settings">App settings</string>
 	<string name="open_root_manager">Open root manager</string>
 	<string name="taildrop_channel">Taildrop</string>
 	<string name="taildrop_channel_desc">Files received from your Tailnet</string>
@@ -158,33 +141,32 @@
 	<string name="peer_offline">Offline</string>
 	<string name="peer_offline_label">offline</string>
 	<string name="peer_offline_toast">That device is offline. It cannot receive files right now.</string>
-	<string name="share_n_files">%1$d file(s) waiting</string>
 	<string name="state_no_internet">No internet</string>
 	<string name="state_daemon_stopped">Stopped</string>
-	<string name="taildrop_open_with">Open with</string>
 	<string name="send_no_online">No device online</string>
 	<string name="send_need_signin">Sign in to send</string>
 	<string name="t_use_exit">Use an exit node</string>
-	<string name="d_use_exit">Route all traffic through a chosen device</string>
 	<string name="exit_node_none">None</string>
 	<string name="exit_node_set">Exit node: %s</string>
 	<string name="time_now">just now</string>
 	<string name="time_min">m ago</string>
 	<string name="time_hour">h ago</string>
 	<string name="time_day">d ago</string>
-	<string name="received_while_away">%d file(s) received</string>
 	<string name="module_broken_short">Module not working</string>
 	<string name="module_broken_hint">Root is granted, but the module is not answering. Reflash the module zip.</string>
+	<string name="module_broken_title">Module not\nanswering</string>
+	<string name="module_broken_body">Root is granted, so the app can run, but the Tailscale module did not answer. It may still be starting, or its files are missing. Reflash the module zip if this keeps happening.</string>
+	<string name="retry">Retry</string>
 	<string name="received_files_row">Received files (%d)</string>
 	<string name="received_files_row_none">Received files</string>
 	<string name="taildrop_folder_sub">Downloads/Tailscale, automatically</string>
-  	<string name="wireless_adb_group">Wireless debugging</string>
-  	<string name="wireless_adb_switch">adb over the network</string>
-  	<string name="wireless_adb_sub">Reach the phone with adb on its Tailscale address</string>
-  	<string name="wireless_adb_address">Address</string>
-  	<string name="wireless_adb_warning">This is a risk, and it is marked as one. Anything that can reach this phone on the tailnet, and that has your adb key, has the phone: it can read everything on it and change anything on it. The port stays open until you turn this off. Turn it off when you do not need it.</string>
-  	<string name="wireless_adb_confirm">This opens port 5555 on the phone\'s tailnet, so that adb can reach it without a cable.\n\nAnything on your tailnet with your adb key can then control the phone completely. The port stays open until you turn this off.\n\nTurn it on?</string>
-  	<string name="wireless_adb_turn_on">Turn on</string>
-  	<string name="wireless_adb_on_toast">Wireless debugging is on</string>
-  	<string name="wireless_adb_off_toast">Wireless debugging is off</string>
+	<string name="wireless_adb_group">Wireless debugging</string>
+	<string name="wireless_adb_switch">adb over the network</string>
+	<string name="wireless_adb_sub">Reach the phone with adb on its Tailscale address</string>
+	<string name="wireless_adb_address">Address</string>
+	<string name="wireless_adb_warning">This is a risk, and it is marked as one. Anything that can reach this phone on the tailnet, and that has your adb key, has the phone: it can read everything on it and change anything on it. The port stays open until you turn this off. Turn it off when you do not need it.</string>
+	<string name="wireless_adb_confirm">This opens port 5555 on the phone\'s tailnet, so that adb can reach it without a cable.\n\nAnything on your tailnet with your adb key can then control the phone completely. The port stays open until you turn this off.\n\nTurn it on?</string>
+	<string name="wireless_adb_turn_on">Turn on</string>
+	<string name="wireless_adb_on_toast">Wireless debugging is on</string>
+	<string name="wireless_adb_off_toast">Wireless debugging is off</string>
 </resources>

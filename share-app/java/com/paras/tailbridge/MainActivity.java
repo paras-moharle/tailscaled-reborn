@@ -65,6 +65,8 @@ public class MainActivity extends Activity {
 
 	/** peer name -> ip, for every known peer, online or not. */
 	private final Map<String, String> peers = new LinkedHashMap<>();
+	/** The same peers, parsed once per status document. */
+	private List<Api.Peer> peerList = new ArrayList<>();
 	/** The subset that is currently reachable. Sending is allowed to these only. */
 	private final Set<String> onlinePeers = new LinkedHashSet<>();
 	/** peers ticked as send targets. */
@@ -97,6 +99,12 @@ public class MainActivity extends Activity {
 	private JSONObject status;
 	private boolean polling;
 	private static final long POLL_MS = 15000;
+	/** A refresh is already running. A second one would only race it. */
+	private boolean refreshing;
+	/** Something asked for a refresh while one was running. */
+	private boolean refreshAgain;
+	/** Which tab bodies are stale. Only the visible one is rebuilt. */
+	private final boolean[] dirty = { true, true, true };
 	private volatile String latestVersion = "";
 	/** Whether adbd is listening for TCP connections. */
 	private volatile boolean adbWireless;
@@ -162,6 +170,44 @@ public class MainActivity extends Activity {
 		checkRoot();
 		askNotificationPermission();
 		registerNetworkWatcher();
+		cleanCache();
+	}
+
+	/**
+	 * Drop staged copies from previous runs.
+	 *
+	 * <p>Every send copies the picked files into the app cache before the
+	 * daemon reads them. Nothing deleted them afterwards, so a few large
+	 * transfers quietly filled the cache and Android eventually cleared it
+	 * at a bad moment. A send cleans up after itself; this catches the one
+	 * that was interrupted.
+	 */
+	private void cleanCache() {
+		new Thread(() -> {
+			// Anything staged in the last minute may belong to the share
+			// intent that launched this activity, so leave it alone.
+			long before = System.currentTimeMillis() - 60_000L;
+			java.io.File send = new java.io.File(getCacheDir(), "send");
+			java.io.File share = new java.io.File(getCacheDir(), "share");
+			wipe(send, before);
+			wipe(share, before);
+		}).start();
+	}
+
+	private static void wipe(java.io.File dir, long before) {
+		java.io.File[] files = dir.listFiles();
+		if (files == null) {
+			return;
+		}
+		for (java.io.File f : files) {
+			if (f.isDirectory()) {
+				wipe(f, before);
+			}
+			if (f.lastModified() < before) {
+				//noinspection ResultOfMethodCallIgnored
+				f.delete();
+			}
+		}
 	}
 
 	private static final int REQ_NOTIFY = 4242;
@@ -332,6 +378,7 @@ public class MainActivity extends Activity {
 				pill.setVisibility(i == n ? View.VISIBLE : View.INVISIBLE);
 			}
 		}
+		buildVisible();
 	}
 
 
@@ -513,10 +560,10 @@ public class MainActivity extends Activity {
 		findViewById(R.id.navBar).setVisibility(View.VISIBLE);
 		applyHeader(st);
 
-		List<Api.Peer> ps = Api.peersFrom(st);
+		peerList = Api.peersFrom(st);
 		peers.clear();
 		onlinePeers.clear();
-		for (Api.Peer p : ps) {
+		for (Api.Peer p : peerList) {
 			peers.put(p.name, p.ip);
 			if (p.online) {
 				onlinePeers.add(p.name);
@@ -524,13 +571,60 @@ public class MainActivity extends Activity {
 		}
 		chosen.retainAll(onlinePeers);
 
-		buildSend(ps);
-		buildSettings(st);
-		buildSystem(st);
+		dirty[0] = dirty[1] = dirty[2] = true;
+		buildVisible();
+	}
+
+	/** Re-index the peer list from a fresh status document. */
+	private void indexPeers(JSONObject st) {
+		peerList = Api.peersFrom(st);
+		peers.clear();
+		onlinePeers.clear();
+		for (Api.Peer p : peerList) {
+			peers.put(p.name, p.ip);
+			if (p.online) {
+				onlinePeers.add(p.name);
+			}
+		}
+		chosen.retainAll(onlinePeers);
+	}
+
+	/** Rebuild only the tab on screen, and only when it is stale. */
+	private void buildVisible() {
+		if (status == null) {
+			return;
+		}
+		switch (currentTab) {
+			case 0:
+				if (dirty[0]) {
+					buildSend();
+					dirty[0] = false;
+				}
+				break;
+			case 1:
+				if (dirty[1]) {
+					buildSettings(status);
+					dirty[1] = false;
+				}
+				break;
+			case 2:
+				if (dirty[2]) {
+					buildSystem(status);
+					dirty[2] = false;
+				}
+				break;
+			default:
+				break;
+		}
 	}
 
 
 	private void refresh() {
+		if (refreshing) {
+			refreshAgain = true;
+			return;
+		}
+		refreshing = true;
 		new Thread(() -> {
 			JSONObject st = null;
 			String err = null;
@@ -547,6 +641,7 @@ public class MainActivity extends Activity {
 			final JSONObject fSt = st;
 			final String fErr = err;
 			ui.post(() -> {
+				refreshing = false;
 				status = fSt;
 				adbWireless = Api.adbWirelessOn(fSt);
 				hidePullSpinner();
@@ -554,6 +649,10 @@ public class MainActivity extends Activity {
 					renderOffline(fErr);
 				} else {
 					render(fSt);
+				}
+				if (refreshAgain) {
+					refreshAgain = false;
+					refresh();
 				}
 			});
 
@@ -673,7 +772,9 @@ public class MainActivity extends Activity {
 						if (!sig.equals(lastBodySignature)) {
 							lastBodySignature = sig;
 							status = fSt;
-							rebuildVisible();
+							indexPeers(fSt);
+							dirty[0] = dirty[1] = dirty[2] = true;
+							buildVisible();
 						}
 					}
 				});
@@ -699,19 +800,8 @@ public class MainActivity extends Activity {
 	}
 
 	private void rebuildVisible() {
-		switch (currentTab) {
-			case 0:
-				buildSend(Api.peersFrom(status));
-				break;
-			case 1:
-				buildSettings(status);
-				break;
-			case 2:
-				buildSystem(status);
-				break;
-			default:
-				break;
-		}
+		dirty[currentTab] = true;
+		buildVisible();
 	}
 
 	private void registerNetworkWatcher() {
@@ -753,7 +843,7 @@ public class MainActivity extends Activity {
 				: R.string.module_broken_short));
 		versionView.setText(noRoot ? getString(R.string.grant_root)
 				: getString(R.string.module_broken_hint));
-		setStatusColor(getColor(R.color.warn));
+		setStatusColor(getColor(noRoot ? R.color.warn : R.color.err));
 
 		pSend.removeAllViews();
 		pSettings.removeAllViews();
@@ -773,15 +863,17 @@ public class MainActivity extends Activity {
 		box.setOrientation(LinearLayout.VERTICAL);
 		box.setGravity(Gravity.CENTER_HORIZONTAL);
 
-		ImageView lock = new ImageView(this);
-		lock.setImageResource(R.drawable.ic_lock);
-		lock.setContentDescription(getString(R.string.grant_root));
-		LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(dp(72), dp(72));
-		llp.bottomMargin = dp(28);
-		box.addView(lock, llp);
+		ImageView mark = new ImageView(this);
+		mark.setImageResource(noRoot ? R.drawable.ic_lock : R.drawable.ic_system);
+		mark.setColorFilter(getColor(noRoot ? R.color.text2 : R.color.err));
+		mark.setContentDescription(getString(noRoot
+				? R.string.grant_root : R.string.module_broken_short));
+		LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(dp(62), dp(62));
+		llp.bottomMargin = dp(26);
+		box.addView(mark, llp);
 
 		TextView title = new TextView(this);
-		title.setText(R.string.grant_root_title);
+		title.setText(noRoot ? R.string.grant_root_title : R.string.module_broken_title);
 		title.setTextColor(getColor(R.color.text));
 		title.setTextSize(26);
 		title.setGravity(Gravity.CENTER);
@@ -790,7 +882,7 @@ public class MainActivity extends Activity {
 		box.addView(title);
 
 		TextView body = new TextView(this);
-		body.setText(R.string.grant_root_body);
+		body.setText(noRoot ? R.string.grant_root_body : R.string.module_broken_body);
 		body.setTextColor(getColor(R.color.text2));
 		body.setTextSize(15);
 		body.setGravity(Gravity.CENTER);
@@ -803,14 +895,24 @@ public class MainActivity extends Activity {
 		box.addView(body, blp);
 
 		TextView open = new TextView(this);
-		open.setText(R.string.open_root_manager);
+		open.setText(noRoot ? R.string.open_root_manager : R.string.retry);
 		open.setTextColor(getColor(R.color.onAccent));
 		open.setTextSize(16);
 		open.setGravity(Gravity.CENTER);
+		open.setTypeface(null, android.graphics.Typeface.BOLD);
 		open.setBackgroundResource(R.drawable.btn_primary);
 		open.setPadding(dp(16), dp(16), dp(16), dp(16));
 		open.setClickable(true);
-		open.setOnClickListener(v -> openRootManager());
+		open.setOnClickListener(v -> {
+			if (noRoot) {
+				openRootManager();
+				return;
+			}
+			// The module may have been reflashed while this screen was up.
+			statusView.setText(R.string.loading);
+			versionView.setText("");
+			refresh();
+		});
 		LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(
 				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		olp.topMargin = dp(28);
@@ -818,14 +920,16 @@ public class MainActivity extends Activity {
 		olp.rightMargin = dp(8);
 		box.addView(open, olp);
 
-		TextView back = new TextView(this);
-		back.setText(R.string.grant_root_back);
-		back.setTextColor(getColor(R.color.hint));
-		back.setTextSize(13);
-		back.setGravity(Gravity.CENTER);
-		back.setPadding(dp(16), dp(16), dp(16), dp(0));
-		back.setLineSpacing(dp(3), 1f);
-		box.addView(back);
+		if (noRoot) {
+			TextView back = new TextView(this);
+			back.setText(R.string.grant_root_back);
+			back.setTextColor(getColor(R.color.hint));
+			back.setTextSize(13);
+			back.setGravity(Gravity.CENTER);
+			back.setPadding(dp(16), dp(16), dp(16), dp(0));
+			back.setLineSpacing(dp(3), 1f);
+			box.addView(back);
+		}
 
 		if (err != null && !err.isEmpty() && !err.equals(getString(R.string.need_root_short))) {
 			TextView why = new TextView(this);
@@ -856,7 +960,7 @@ public class MainActivity extends Activity {
 	}
 
 
-	private void buildSend(List<Api.Peer> ps) {
+	private void buildSend() {
 		pSend.removeAllViews();
 		nameValues.clear();
 		nameShown.clear();
@@ -876,32 +980,18 @@ public class MainActivity extends Activity {
 			signInCard();
 		}
 
-		JSONObject self = status == null ? null : status.optJSONObject("self");
-
-		if (self != null && signedIn(status)) {
-			LinearLayout g = group(pSend, getString(R.string.this_device));
-			TextView nv = value(g, getString(R.string.device_name),
-					self.optString("host", "\u2014"));
-			nameValues.add(nv);
-			nameShown.add(self.optString("host", "\u2014"));
-
-			JSONArray ips = self.optJSONArray("tailscaleIPs");
-			if (ips != null) {
-				for (int i = 0; i < ips.length(); i++) {
-					final String ip = ips.optString(i);
-					copyRow(g, i == 0 ? getString(R.string.ipv4) : getString(R.string.ipv6), ip);
-				}
-			}
-			String relay = self.optString("relay", "");
-			value(g, getString(R.string.relay),
-					relay.isEmpty() ? getString(R.string.direct) : relay);
+		if (!pendingUris.isEmpty()) {
+			pendingCard();
 		}
 
 		LinearLayout t = group(pSend, getString(R.string.choose_devices));
-		if (ps.isEmpty()) {
+		if (peerList.isEmpty()) {
 			plain(t, getString(R.string.no_peers_short));
 		} else {
-			for (Api.Peer p : ps) {
+			if (onlinePeers.size() > 1) {
+				t.addView(selectTools());
+			}
+			for (Api.Peer p : peerList) {
 				line(t);
 				t.addView(peerRow(p));
 			}
@@ -923,43 +1013,78 @@ public class MainActivity extends Activity {
 		slp.topMargin = dp(16);
 		pSend.addView(sendBtn, slp);
 
-		if (!pendingUris.isEmpty()) {
-			note(pSend, getString(R.string.shared_n, pendingUris.size()));
-		}
-
-		if (!receivedChecked) {
-			receivedChecked = true;
-			new Thread(() -> {
-				try {
-					JSONObject got = Api.received();
-					final int n = got.optInt("count", 0);
-					receivedCount = n;
-					if (n > 0) {
-						ui.post(() -> {
-							if (pSend != null) {
-								note(pSend, getString(R.string.received_while_away, n));
-							}
-						});
-					}
-				} catch (Exception ignored) {
-				}
-			}).start();
-		}
-
-		LinearLayout d = group(pSend, getString(R.string.daemon));
-		addSwitch(d, getString(R.string.service),
-				getString(R.string.service_sub), daemonUp(status),
-				v -> service(v.isChecked() ? "start" : "stop"));
-		action(d, getString(R.string.restart), null, v -> service("restart"));
-		View supRow = action(d, getString(R.string.supervisor),
-				supervisorUp(status)
-						? getString(R.string.supervisor_running)
-						: getString(R.string.supervisor_stopped),
-				null);
-		supervisorSub = supRow.findViewById(R.id.rowSub);
-		action(d, getString(R.string.console), null, v -> open(CONSOLE_URL));
-
 		updateSendButton();
+	}
+
+	/** Select all / none, for sending to more than one device. */
+	private View selectTools() {
+		LinearLayout tools = new LinearLayout(this);
+		tools.setOrientation(LinearLayout.HORIZONTAL);
+		tools.setGravity(Gravity.CENTER_VERTICAL);
+		tools.setPadding(dp(16), dp(11), dp(16), dp(11));
+
+		TextView all = chip(getString(R.string.select_all));
+		all.setOnClickListener(v -> {
+			chosen.addAll(onlinePeers);
+			saveTargets();
+			buildSend();
+		});
+		TextView none = chip(getString(R.string.select_none));
+		none.setOnClickListener(v -> {
+			chosen.clear();
+			saveTargets();
+			buildSend();
+		});
+
+		tools.addView(all);
+		View gap = new View(this);
+		tools.addView(gap, new LinearLayout.LayoutParams(0, 1, 1f));
+		tools.addView(none);
+		return tools;
+	}
+
+	/** What is waiting to go: the files that arrived through the share sheet. */
+	private void pendingCard() {
+		LinearLayout card = new LinearLayout(this);
+		card.setOrientation(LinearLayout.HORIZONTAL);
+		card.setGravity(Gravity.CENTER_VERTICAL);
+		card.setBackgroundResource(R.drawable.group);
+		card.setPadding(dp(18), dp(16), dp(12), dp(16));
+		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		lp.topMargin = dp(14);
+		pSend.addView(card, lp);
+
+		ImageView icon = new ImageView(this);
+		icon.setImageResource(R.drawable.ic_send);
+		icon.setColorFilter(getColor(R.color.accent));
+		LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(20), dp(20));
+		ilp.rightMargin = dp(14);
+		card.addView(icon, ilp);
+
+		LinearLayout col = col();
+		TextView t = new TextView(this);
+		t.setText(getString(R.string.pending_ready, pendingUris.size()));
+		t.setTextColor(getColor(R.color.text));
+		t.setTextSize(15);
+		t.setIncludeFontPadding(false);
+		col.addView(t);
+		TextView s = new TextView(this);
+		s.setText(R.string.pending_hint);
+		s.setTextColor(getColor(R.color.text2));
+		s.setTextSize(12.5f);
+		s.setIncludeFontPadding(false);
+		s.setPadding(0, dp(3), 0, 0);
+		col.addView(s);
+		card.addView(col, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+		TextView clear = chip(getString(R.string.clear));
+		clear.setOnClickListener(v -> {
+			pendingUris.clear();
+			buildSend();
+		});
+		card.addView(clear);
 	}
 
 	private boolean receivedChecked;
@@ -1145,11 +1270,20 @@ public class MainActivity extends Activity {
 				toast(getString(R.string.peer_offline_toast));
 				return;
 			}
-			if (!chosen.remove(p.name)) {
+			boolean now = !chosen.contains(p.name);
+			if (now) {
 				chosen.add(p.name);
+			} else {
+				chosen.remove(p.name);
 			}
+			// Reflect the choice in place. Rebuilding the whole screen to
+			// show a tick used to cost a root round-trip and reset the
+			// scroll position for a switch that had already moved.
+			cb.setChecked(now);
+			cb.setThumbTintList(android.content.res.ColorStateList.valueOf(
+					getColor(now ? R.color.text : R.color.hint)));
 			saveTargets();
-			refresh();
+			updateSendButton();
 		};
 		row.setOnClickListener(v -> peer.run());
 		row.setClickable(true);
@@ -1357,6 +1491,23 @@ public class MainActivity extends Activity {
 
 				final int fOk = ok, fFailed = failed, fTotal = total;
 				final String p = problems.toString().trim();
+
+				// The copies were only ever a hand-off between the picker and
+				// the daemon. Leaving them behind filled the cache a little
+				// more with every send.
+				for (java.io.File f : files) {
+					//noinspection ResultOfMethodCallIgnored
+					f.delete();
+				}
+				// Text shared into the app is staged as a file:// in
+				// cache/share. It is spent once the send is done.
+				for (Uri u : uris) {
+					if ("file".equals(u.getScheme()) && u.getPath() != null) {
+						//noinspection ResultOfMethodCallIgnored
+						new java.io.File(u.getPath()).delete();
+					}
+				}
+
 				ui.post(() -> {
 					if (fFailed == 0) {
 						progress.success(getString(R.string.sent_summary,
@@ -1552,16 +1703,64 @@ public class MainActivity extends Activity {
 		updateTitle = null;
 		updateSub = null;
 
-		LinearLayout c = group(pSystem, getString(R.string.connectivity));
+		// The daemon lives with the rest of the system controls. It used to
+		// be repeated on the Send screen as well, which put two Start/Stop
+		// switches in front of the one thing Send is for.
+		LinearLayout d = group(pSystem, getString(R.string.daemon));
+		addSwitch(d, getString(R.string.service), getString(R.string.service_sub),
+				daemonUp(st), v -> service(v.isChecked() ? "start" : "stop"));
+		action(d, getString(R.string.restart), null, v -> service("restart"));
+		View supRow = action(d, getString(R.string.supervisor),
+				supervisorUp(st) ? getString(R.string.supervisor_running)
+						: getString(R.string.supervisor_stopped), null);
+		supervisorSub = supRow.findViewById(R.id.rowSub);
+		action(d, getString(R.string.console), null, v -> open(CONSOLE_URL));
+
+		LinearLayout c = group(pSystem, getString(R.string.this_device));
 		value(c, getString(R.string.backend), st.optString("backend", "?"));
 		JSONObject self = st.optJSONObject("self");
 		if (self != null) {
-			TextView nv = value(c, getString(R.string.device_name), self.optString("host", "\u2014"));
+			TextView nv = value(c, getString(R.string.device_name),
+					self.optString("host", "\u2014"));
 			nameValues.add(nv);
 			nameShown.add(self.optString("host", "\u2014"));
+			JSONArray ips = self.optJSONArray("tailscaleIPs");
+			if (ips != null) {
+				for (int i = 0; i < ips.length(); i++) {
+					final String ip = ips.optString(i);
+					copyRow(c, i == 0 ? getString(R.string.ipv4)
+							: getString(R.string.ipv6), ip);
+				}
+			}
+			String relay = self.optString("relay", "");
+			value(c, getString(R.string.relay),
+					relay.isEmpty() ? getString(R.string.direct) : relay);
 		}
 		JSONObject tn = st.optJSONObject("tailnet");
 		String account = tn == null ? "" : tn.optString("name", "");
+
+		// How many Taildrop files landed while the app was closed. One
+		// question per launch; the answer repaints this tab once.
+		if (!receivedChecked) {
+			receivedChecked = true;
+			new Thread(() -> {
+				try {
+					JSONObject got = Api.received();
+					final int n = got.optInt("count", 0);
+					receivedCount = n;
+					if (n > 0) {
+						ui.post(() -> {
+							dirty[2] = true;
+							buildVisible();
+						});
+					}
+				} catch (Exception e) {
+					// Try again on the next visit rather than remembering a
+					// failure as an answer of zero.
+					receivedChecked = false;
+				}
+			}).start();
+		}
 
 		LinearLayout a1 = group(pSystem, getString(R.string.account));
 		value(a1, getString(R.string.tailnet), account.isEmpty()

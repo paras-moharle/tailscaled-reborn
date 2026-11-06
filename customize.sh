@@ -177,13 +177,11 @@ if [ -d "$TS_DIR" ]; then
 	# shellcheck disable=SC2154
 	rm -rf "$TS_DIR/backups/$versionCode/" && mkdir -p "$TS_DIR/backups/$versionCode/"
 	# Everything a new version replaces is set aside, so a flash does not
-	# leave a half-written file behind. The clipboard's own files are not
-	# that: they are history and settings, and a phone that was flashed
-	# came back with an empty clipboard and a reset limit, because the
-	# history had been moved into a backup nobody was looking at.
+	# leave a half-written file behind. State that belongs to the user is
+	# not replaced: it survives the flash in place.
 	for p in "$TS_DIR"/*; do
 		case "$(basename "$p")" in
-		ssh | certs | backups | tailscaled.state | clipboard.jsonl | clipboard.conf | clipboard.keyns) ;;
+		ssh | certs | backups | tailscaled.state) ;;
 		*)
 			mv -f -- "$p" "$TS_DIR/backups/$versionCode/"
 			;;
@@ -264,26 +262,6 @@ mkdir -p "$TS_DIR" "$TS_SCRIPTS_DIR" "$SERVICE_DIR" "$MODPATH/system/bin/"
 unzip -qqjo "$ZIPFILE" 'tailscale/scripts/*' -d "$TS_SCRIPTS_DIR"
 unzip -qqjo "$ZIPFILE" 'tailscale/settings.sh' -d "$TS_DIR"
 
-# The clipboard helper.
-#
-# It is kept with the rest of the module, and a read-only copy is placed
-# where the shell uid can read it: the helper has to run as the shell uid,
-# because that is the only uid the clipboard service trusts without a prompt
-# from the user, and it cannot reach anything under /data/adb -- that
-# directory is mode 0700.
-#
-# The copy has to be read-only for the caller as well. ART refuses to load a
-# dex file the caller could modify, and it does so by aborting with no
-# message at all.
-mkdir -p "$TS_DIR/clip"
-unzip -qqjo "$ZIPFILE" 'tailscale/clip/clip.dex' -d "$TS_DIR/clip" 2>/dev/null || true
-if [ -f "$TS_DIR/clip/clip.dex" ]; then
-	chmod 0644 "$TS_DIR/clip/clip.dex"
-	rm -f /data/local/tmp/tailbridge-clip.dex
-	cp "$TS_DIR/clip/clip.dex" /data/local/tmp/tailbridge-clip.dex
-	chown 0:0 /data/local/tmp/tailbridge-clip.dex
-	chmod 0444 /data/local/tmp/tailbridge-clip.dex
-fi
 ln -sf "$TS_BIN_DIR/tailscaled" "$TS_BIN_DIR/tailscale"
 ln -sf "$TS_BIN_DIR/"* "$MODPATH/system/bin/"
 

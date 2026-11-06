@@ -9,11 +9,11 @@ set -e
 
 # Files this module writes are root's alone until something proves
 # otherwise. Every file created after this line inherits this PERMISSION:
-# 077 removes group and other, so a log, a store, a token file or a
-# temporary clip lands at 0600 and nothing readable-but-rootless can open
-# it. The old install ran at the caller's umask, which was 0666/0722
-# depending on who sourced us, which is how a clipboard store readable by
-# every app on the phone happened in the first place.
+# 077 removes group and other, so a log, a store or a token file lands at
+# 0600 and nothing readable-but-rootless can open it. The old install ran
+# at the caller's umask, which was 0666/0722 depending on who sourced us,
+# which is how a private file readable by every app on the phone happened
+# in the first place.
 umask 077
 
 # Custom settings
@@ -103,185 +103,6 @@ export TS_CLI="${TS_BIN_DIR}/tailscale"
 # Where Taildrop deliveries are placed so they show up in the Files app.
 export TS_TAILDROP_DIR="${TS_TAILDROP_DIR:-/sdcard/Download/Tailscale}"
 
-# ---------------------------------------------------------------------------
-# Clipboard helper
-# ---------------------------------------------------------------------------
-#
-# The helper is a small program that runs under app_process to read, write and
-# watch the clipboard. It has to run as the shell uid, and the clipboard
-# service checks that the calling process owns the package it claims to be --
-# so the helper always claims com.android.shell, which the shell uid owns.
-#
-# Two things about where it lives:
-#
-#   - It cannot live under /data/adb. That directory is mode 0700, so the
-#     shell uid cannot even traverse it, and the helper would die with a
-#     ClassNotFoundException that says nothing about permissions.
-#
-#   - The copy the helper loads must not be writable by the caller. ART
-#     refuses to load a dex file the caller could modify, and the failure is
-#     an abort with no message.
-#
-# So the canonical copy lives with the rest of the module, and a read-only
-# copy is placed where the shell uid can read it. ensure_clip_dex() puts it
-# back if it goes missing.
-# The clipboard's own settings: what to record, how much to keep, and which
-# apps to leave alone. A plain key=value file next to the store, because the
-# watcher is a separate process from the app and both have to agree on it.
-TS_CLIP_CONF="${TS_CLIP_CONF:-${TS_DIR}/clipboard.conf}"
-TS_CLIP_DEX="${TS_DIR}/clip/clip.dex"
-TS_CLIP_DEX_RUN="${TS_CLIP_DEX_RUN:-/data/local/tmp/tailbridge-clip.dex}"
-TS_CLIP_CLASS="com.paras.tailbridge.clip.ClipBoard"
-TS_CLIP_STORE="${TS_CLIP_STORE:-${TS_DIR}/clipboard.jsonl}"
-
-# The crypto helper, and how to run it.
-#
-# The key is in the device's hardware keystore, so the history on disk is
-# ciphertext that a copy of the storage cannot read. The helper has to run as
-# root, because that is whose keystore namespace the key belongs to, and
-# because it is the one that can read the store.
-TS_CLIP_CRYPTO_CLASS="com.paras.tailbridge.clip.ClipCrypto"
-
-# clip_crypto <mode> [args...]
-#
-# Base64 in, base64 out, or a whole store in and out.
-#
-# The keystore keeps a separate set of keys for every user of the device,
-# so the helper has to run as the same user every time: a history written
-# with root's key cannot be read with the shell's. Which user works is
-# asked once and remembered, in a file that is kept when the module is
-# flashed, because a history that suddenly cannot be read is worse than no
-# history at all.
-#
-# Root is tried first. Some devices will not generate a key for a process
-# with no package behind it, and the shell uid is the fallback: it has its
-# own namespace in the same keystore, and a key there is just as much a
-# key that cannot be copied out of the hardware.
-clip_crypto_who() {
-	_who="$(cat "${TS_DIR}/clipboard.keyns" 2>/dev/null)"
-	case "$_who" in
-	root | shell) printf '%s' "$_who"; return 0 ;;
-	esac
-	_who=root
-	if ! CLASSPATH="$TS_CLIP_DEX" app_process /system/bin "$TS_CLIP_CRYPTO_CLASS" probe >/dev/null 2>&1; then
-		_who=shell
-		# The shell uid cannot read /data/adb, so it uses the copy of
-		# the helper that lives where the shell can reach it.
-		_dex="$TS_CLIP_DEX_RUN"
-		if ! su 2000 -c "CLASSPATH='$_dex' app_process /system/bin $TS_CLIP_CRYPTO_CLASS probe" >/dev/null 2>&1; then
-			# Neither works. The keystore cannot be reached from
-			# here, and the history will have to be kept in plain
-			# text, which the watcher says out loud.
-			printf ''
-			return 1
-		fi
-	fi
-	printf '%s' "$_who" > "${TS_DIR}/clipboard.keyns" 2>/dev/null
-	printf '%s' "$_who"
-}
-
-clip_crypto() {
-	# The text goes in on stdin and the answer comes out on stdout.
-	_mode="$1"
-	shift
-	_cmd="$_mode"
-	for _a in "$@"; do
-		_cmd="$_cmd $_a"
-	done
-	_payload="$(cat 2>/dev/null)"
-
-	# The desk.
-	#
-	# It is a program that stays running with the keystore open, so the
-	# work takes a few tens of milliseconds. The alternative -- running the
-	# helper on its own -- takes a couple of seconds on this phone, and
-	# that is a couple of seconds on every copy.
-	_port="$(cat "${TS_DIR}/clip.port" 2>/dev/null)"
-	_token="$(cat "${TS_DIR}/clip.token" 2>/dev/null)"
-	if [ -n "$_port" ] && [ -n "$_token" ]; then
-		_out="$(printf '%s\n%s\n%s' "$_token" "$_cmd" "$_payload" |
-			nc -w 15 127.0.0.1 "$_port" 2>/dev/null)"
-		case "$_out" in
-		'' | err:*) ;;
-		*)
-			printf '%s' "$_out"
-			return 0
-			;;
-		esac
-	fi
-
-	# The helper on its own. It does the same work, slowly.
-	[ -f "$TS_CLIP_DEX" ] || return 1
-	_who="$(clip_crypto_who)"
-	[ -n "$_who" ] || return 1
-	if [ "$_who" = "root" ]; then
-		printf '%s' "$_payload" | CLASSPATH="$TS_CLIP_DEX" app_process /system/bin \
-			"$TS_CLIP_CRYPTO_CLASS" "$_mode" "$@" 2>/dev/null
-	else
-		printf '%s' "$_payload" | su 2000 -c "CLASSPATH='$TS_CLIP_DEX_RUN' app_process /system/bin \
-			$TS_CLIP_CRYPTO_CLASS $_mode $*" 2>/dev/null
-	fi
-}
-
-# clip_conf <key> [default]
-#
-# One setting from the clipboard's configuration file.
-clip_conf() {
-	_k="$1"
-	_d="${2:-}"
-	[ -f "$TS_CLIP_CONF" ] || { printf '%s' "$_d"; return 0; }
-	_v="$(grep -m1 "^${_k}=" "$TS_CLIP_CONF" 2>/dev/null | cut -d= -f2-)"
-	[ -n "$_v" ] || _v="$_d"
-	printf '%s' "$_v"
-}
-
-# clip_conf_set <key> <value>
-#
-# The file is rewritten rather than edited in place, so a reader never sees a
-# half-written line.
-clip_conf_set() {
-	_k="$1"
-	_v="$2"
-	mkdir -p "$TS_DIR" 2>/dev/null
-	_tmp="${TS_CLIP_CONF}.tmp.$$"
-	: > "$_tmp" 2>/dev/null
-	if [ -f "$TS_CLIP_CONF" ]; then
-		grep -v "^${_k}=" "$TS_CLIP_CONF" 2>/dev/null >> "$_tmp" 2>/dev/null
-	fi
-	printf '%s=%s\n' "$_k" "$_v" >> "$_tmp" 2>/dev/null
-	chmod 0600 "$_tmp" 2>/dev/null
-	mv -f "$_tmp" "$TS_CLIP_CONF" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
-	return 0
-}
-
-ensure_clip_dex() {
-	[ -f "$TS_CLIP_DEX" ] || return 1
-	# Already there, already read-only for the caller, and already the same
-	# file: nothing to do.
-	#
-	# The comparison is on the contents and not only on the permissions.
-	# The copy in /data/local/tmp is the one that actually runs, and a
-	# module update brings a new helper; leaving the old one in place
-	# would mean running last month's helper for ever.
-	if [ -f "$TS_CLIP_DEX_RUN" ]; then
-		_perm="$(ls -l "$TS_CLIP_DEX_RUN" 2>/dev/null | cut -c1-10)"
-		case "$_perm" in
-		r--------r-------- | r--------r--r-- | r--r--r--r-- | r--r--r---)
-			if cmp -s "$TS_CLIP_DEX" "$TS_CLIP_DEX_RUN" 2>/dev/null; then
-				return 0
-			fi
-			;;
-		esac
-	fi
-	# Replace it: a file the caller can write to would be refused by ART.
-	rm -f "$TS_CLIP_DEX_RUN" 2>/dev/null
-	cp "$TS_CLIP_DEX" "$TS_CLIP_DEX_RUN" 2>/dev/null || return 1
-	chown 0:0 "$TS_CLIP_DEX_RUN" 2>/dev/null || true
-	chmod 0444 "$TS_CLIP_DEX_RUN" 2>/dev/null || true
-	[ -f "$TS_CLIP_DEX_RUN" ]
-}
-
-# ---------------------------------------------------------------------------
 # Module status in the root manager
 # ---------------------------------------------------------------------------
 #
@@ -296,51 +117,58 @@ ensure_clip_dex() {
 # written; it was simply never revised.
 #
 # So the state is now re-checked rather than remembered. The description is
-# rewritten only when the state actually changes, because module.prop lives
-# on flash and rewriting it every few seconds is wear for nothing.
+# rewritten only when what it says actually changes, because module.prop
+# lives on flash and rewriting it every few seconds is wear for nothing.
 #
-#   running  -> "✔ tailscaled service is running!!!"
-#   stopped  -> "✘ tailscaled is not running"
+# The clock used to be part of this line, but it was stamped once when the
+# supervisor started and then froze, so "7:28" stayed on screen all day.
+# The line now says what is true right now instead: whether the daemon is
+# up and whether the Taildrop receiver is alongside it.
+#
+#   running, receiver up    -> "[ ✔ tailscaled running · Taildrop ready ]"
+#   running, receiver down  -> "[ ✔ tailscaled running · receiver down ]"
+#   stopped                 -> "[ ✘ tailscaled stopped ]"
 TS_MODULE_STATE_FILE="${TS_RUN_DIR}/module.state"
 
 ts_module_desc() {
 	case "$1" in
-	running) printf '[ ⏲ %s | ✔ tailscaled service is running!!! ] ' "$CURRENT_TIME" ;;
-	stopped) printf '[ ⏲ %s | ✘ tailscaled is not running ] ' "$CURRENT_TIME" ;;
+	running)
+		if busybox pgrep -f 'tailscaled.receive' >/dev/null 2>&1; then
+			printf '[ ✔ tailscaled running · Taildrop ready ] '
+		else
+			printf '[ ✔ tailscaled running · receiver down ] '
+		fi
+		;;
+	stopped) printf '[ ✘ tailscaled stopped ] ' ;;
 	*) return 1 ;;
 	esac
 }
 
 # ts_module_status <running|stopped>
 #
-# Writes the state into module.prop, but only when it differs from the last
-# state we wrote. A missing or unreadable module.prop is not fatal: the
-# module still works, it just does not advertise itself in the manager.
+# Writes the state into module.prop, but only when what it says actually
+# changes. A missing or unreadable module.prop is not fatal: the module
+# still works, it just does not advertise itself in the manager.
 ts_module_status() {
 	_want="$1"
+	_desc="$(ts_module_desc "$_want")" || return 0
 
-	# What the file actually says right now.
+	# The description's bracketed prefix, as the file actually has it now.
 	#
 	# Not what we last wrote: after a reboot the file and our memory of it
-	# can both be stale -- the description says "running" from yesterday, and
-	# the state file says "running" too, so comparing the two would agree
-	# with a lie. The file is the only thing the root manager ever reads, so
-	# the file is what has to be compared.
-	_have="unknown"
+	# can both be stale -- the description says "running" from yesterday,
+	# and the state file says "running" too, so comparing the two would
+	# agree with a lie. The file is the only thing the root manager reads.
+	_have=""
 	if [ -f "$TS_MOD_PROP" ]; then
-		_line="$(sed -n 's/^description=\[\([^]]*\)\].*/\1/p' "$TS_MOD_PROP" 2>/dev/null | head -1)"
-		case "$_line" in
-		*'tailscaled service is running'*) _have=running ;;
-		*'tailscaled is not running'*) _have=stopped ;;
-		esac
+		_have="$(sed -n 's/^description=\(\[[^]]*\] \).*/\1/p' "$TS_MOD_PROP" 2>/dev/null | head -1)"
 	fi
-	[ "$_have" = "$_want" ] && return 0
+	[ "$_have" = "$_desc" ] && return 0
 
 	mkdir -p "$TS_RUN_DIR" 2>/dev/null
 	echo "$_want" > "$TS_MODULE_STATE_FILE" 2>/dev/null || true
 
 	[ -f "$TS_MOD_PROP" ] || return 0
-	_desc="$(ts_module_desc "$_want")" || return 0
 	# The description carries a sentence of its own after the status, so the
 	# status is replaced rather than the whole line.
 	_tmp="$TS_MOD_PROP.ts.$$"
@@ -443,8 +271,11 @@ latest_published_epoch() {
 	feed_field '.publishedAtEpoch // empty'
 }
 
-# Take the current time
-CURRENT_TIME=$(date +"%I:%M %P" 2>/dev/null || echo "--:-- --")
+# Take the current time. 24-hour, so there is no AM/PM to lose: busybox
+# date on Android does not understand the GNU-only %P, which made every log
+# line and the module description read "7:28 " with the half of the clock
+# missing.
+CURRENT_TIME=$(date +"%H:%M:%S" 2>/dev/null || echo "--:--:--")
 
 # ---------------------------------------------------------------------------
 # Auto-update settings

@@ -63,6 +63,12 @@ jobs:
 
       - name: Build the missing Android binaries
         if: steps.v.outputs.needed == 'true' || inputs.force == true
+        env:
+          # gh refuses to run in Actions unless it is handed a token. The
+          # workflow had actions:write, but without this the step died with
+          # "set the GH_TOKEN environment variable" every morning, so no
+          # daemon was ever built for a new upstream release.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh workflow run build-android.yml \

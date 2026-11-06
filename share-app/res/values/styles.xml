@@ -41,33 +41,9 @@
 		<item name="android:textColor">@color/text2</item>
 	</style>
 
-	<!-- A row's title. -->
-	<style name="Text.RowTitle">
-		<item name="android:textSize">15sp</item>
-		<item name="android:textColor">@color/text</item>
-	</style>
-
-	<!-- A row's explanation. -->
-	<style name="Text.RowSub">
-		<item name="android:textSize">12.5sp</item>
-		<item name="android:textColor">@color/text2</item>
-	</style>
-
-	<!-- The name of a group of rows. Small, wide, and quiet, so it labels
-	     without competing with what it labels. -->
-	<style name="Text.Section">
-		<item name="android:textSize">11sp</item>
-		<item name="android:textColor">@color/hint</item>
-		<item name="android:textStyle">bold</item>
-		<item name="android:textAllCaps">true</item>
-		<item name="android:letterSpacing">0.1</item>
-	</style>
-
-	<!-- The text of a note under a group. -->
-	<style name="Text.Note">
-		<item name="android:textSize">12.5sp</item>
-		<item name="android:textColor">@color/hint</item>
-	</style>
+	<!-- A row's title, explanation, and a group note used to live here as
+	     Text.RowTitle / RowSub / Section / Note. The screens now build
+	     those inline, so the styles were dead weight. -->
 
 	<!-- ── bottom nav ───────────────────────────────────────────── -->
 	<!-- The item itself has no background.

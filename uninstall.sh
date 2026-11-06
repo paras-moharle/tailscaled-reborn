@@ -20,15 +20,17 @@ for PID in $(pgrep -f '/tailscale/scripts/keepalive.sh' 2>/dev/null); do
     kill -9 "$PID" 2>/dev/null
 done
 
-# The clipboard watcher and the crypto desk are long-lived processes of
-# their own. The desk holds the device's keystore open, and it has to be
-# stopped as well, or it sits there with a socket nothing can use.
+# Older versions ran a clipboard watcher and a keystore helper. They are
+# not part of this build, but a phone that upgraded in place can still have
+# one running, holding the socket and the keystore open. Stop them and drop
+# the helper copy the shell uid could read.
 for PID in $(pgrep -f '/tailscale/scripts/clipwatch.sh' 2>/dev/null); do
     kill -9 "$PID" 2>/dev/null
 done
 for PID in $(pgrep -f 'com.paras.tailbridge.clip.ClipStore' 2>/dev/null); do
     kill -9 "$PID" 2>/dev/null
 done
+rm -f /data/local/tmp/tailbridge-clip.dex 2>/dev/null
 
 # TailBridge is installed as an ordinary user app by customize.sh, so removing
 # the module used to leave it behind: a launcher icon with no daemon behind it,

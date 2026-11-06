@@ -96,7 +96,7 @@ final class TransferDialog {
 		// A transfer is not something to dismiss by tapping beside it: the
 		// files are already moving, and a card that vanishes mid-flight
 		// says nothing about whether they arrived.
-		sheet.show();
+		sheet.locked().show();
 	}
 
 	void subtitle(String text) {

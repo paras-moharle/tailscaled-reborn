@@ -1,3 +1,51 @@
+## v1.0.33  2026-11-06
+
+- **tailscaled 1.104.5.** The daemon is now built from upstream v1.104.5. The
+  port needed real work for this one: 1.104.5 splits Tailscale SSH into a
+  per-connection monitor process (`ssh-monitor`) plus a client, a forwarded
+  child and connection/session monitors, and every one of those files was
+  excluded on Android. The build tags now include Android, so the port
+  compiles instead of dying with `undefined: beMonitor`. Two other upstream
+  refactors were absorbed: `ssh/tailssh/incubator.go` moved the launch path,
+  so the Android home-directory patch was re-anchored, and `util/osuser` no
+  longer imports `os/exec` in `group_ids.go`, so the Android group lookup now
+  goes through the package's own `execId` helper.
+- **The module line in the root manager tells the truth.** It used to print a
+  clock that was stamped once at boot and then froze, so the manager said
+  "7:28" all day, and it only changed when the daemon was started or stopped,
+  so a daemon killed in the background still read "running". The line now has
+  no clock in it and is rebuilt from live state: `[ ✔ tailscaled running ·
+  Taildrop ready ]`, `[ ✔ tailscaled running · receiver down ]`, or
+  `[ ✘ tailscaled stopped ]`. It is rewritten only when the text actually
+  changes, because `module.prop` lives on flash.
+- **Log lines have a whole clock again.** `CURRENT_TIME` used `%P`, which is
+  GNU-only; Android's busybox `date` does not understand it, which is why every
+  log line and the old module description read "7:28 " with the AM/PM half
+  missing. It is 24-hour `%H:%M:%S` now, and the supervisor refreshes it on
+  every pass instead of logging every line at the time it started.
+- **The clipboard feature is gone, completely.** It was the largest and most
+  fragile part of the module: a root-run watcher, a keystore-backed helper
+  dex, a second long-lived process holding the keystore open, module settings,
+  API commands, a desktop receiver that decoded `TBCLIP1` files, and a
+  PowerShell script on Windows. It has been removed from the app, the module
+  scripts and the desktop tools. The app now controls the daemon and moves
+  files, and nothing else. An upgrade stops any old clip process and removes
+  the helper dex; `tailscaled.receive` no longer special-cases clip payloads.
+- **The app is built around those two jobs.** The Send tab is file sharing
+  only; the daemon switch, this device's addresses and the supervisor moved to
+  System; Settings holds the daemon preferences. Only the tab on screen is
+  rebuilt, so tapping between tabs is instant, and picking a device no longer
+  waits on a root round-trip. Transfers show one non-dismissable popup with a
+  live count, and the old spinner-laden dialogs are gone.
+- **Notifications are for files only.** The receive notifier and the desktop
+  receiver no longer raise anything for a clipboard, because there is no
+  clipboard.
+- **The updater was never actually being fed.** `watch-upstream.yml` ran
+  `gh workflow run` without `GH_TOKEN`, so it failed every morning with "set
+  the GH_TOKEN environment variable" and no daemon was ever built for a new
+  upstream release. The token is passed now, which is why 1.104.5 could be
+  built at all.
+
 ## v1.0.31  2026-10-21
 
 - **The small zip can be installed again.** It could not. The installer

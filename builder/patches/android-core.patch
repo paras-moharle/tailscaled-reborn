@@ -938,7 +938,7 @@ index 69bb81a..e35251b 100644
  	for _, kv := range ss.Environ() {
  		if acceptEnvPair(kv) {
  			env = append(env, kv)
-@@ -869,6 +877,11 @@ func (ss *sshSession) launchProcess() error {
+@@ -969,6 +969,11 @@ func (ss *sshSession) launchProcess() error {
  
  	cmd := ss.cmd
  	cmd.Env = ss.incubatorEnv()
@@ -948,8 +948,8 @@ index 69bb81a..e35251b 100644
 +		}
 +	}
  
- 	if len(forwardedEnv) > 0 {
- 		// The accepted environment may contain secrets, so it is passed to the child via an
+ 	// Pass default TERM and locale variables through the environment pipe.
+ 	// Policy-forwarded values take precedence over these defaults.
 @@ -1187,6 +1200,8 @@ func (ia *incubatorArgs) loginArgs(loginCmdPath string) []string {
  			return []string{loginCmdPath, "-f", ia.localUser, "-p"}
  		}
@@ -1203,7 +1203,7 @@ index 34d15c9..f59faa7 100644
 +	if runtime.GOOS == "android" {
 +		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 +		defer cancel()
-+		if out, err := exec.CommandContext(ctx, "id", "-Gz").Output(); err == nil {
++		if out, err := execId(ctx, "-Gz"); err == nil {
 +			if len(out) > 0 {
 +				return parseGroupIds(out), nil
 +			}

@@ -97,6 +97,19 @@ replace ssh/tailssh/user_unix.go \
 replace ssh/tailssh/incubator_linux.go \
 	'//go:build linux && !android' \
 	'//go:build linux'
+# 1.104.5 split ssh-monitor, its client, the forwarded child and the
+# connection/session monitors into their own files, all behind the same
+# non-Android guard. Android is a Linux userspace and runs them; without the
+# tag flip incubator.go references symbols no file defines ("undefined:
+# beMonitor") and the port stops building.
+for _f in connmonitor fwdchild fwdmonitor monitor_client monitor monitor_rpc sessmonitor; do
+	replace "ssh/tailssh/$_f.go" \
+		'//go:build (linux && !android) || (darwin && !ios) || freebsd || openbsd' \
+		'//go:build linux || (darwin && !ios) || freebsd || openbsd'
+done
+replace ssh/tailssh/monitor_linux.go \
+	'//go:build linux && !android' \
+	'//go:build linux'
 # these two already mention android separately, just add the term back
 replace ssh/tailssh/tailssh.go \
 	'//go:build (linux && !android) || (darwin && !ios) || freebsd || openbsd || plan9' \

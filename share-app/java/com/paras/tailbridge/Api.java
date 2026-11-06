@@ -6,7 +6,6 @@ package com.paras.tailbridge;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -315,20 +314,4 @@ final class Api {
 		m.put("snat-subnet-routes", p.optBoolean("snatSubnetRoutes", false));
 		return m;
 	}
-
-	/**
-	 * Copy a received file into this app's own cache so it can actually be read.
-	 *
-	 * Files under /sdcard are owned by the media_rw group and are unreadable to
-	 * an ordinary app, even though a file manager can open them. Root can copy
-	 * them somewhere this app owns, which is what the FileProvider then serves.
-	 */
-
-	/**
-	 * Pull anything waiting in the Taildrop inbox into Downloads/Tailscale.
-	 *
-	 * Without this the daemon accepts inbound files and nothing ever shows them:
-	 * they sit in a root-only inbox the user cannot reach. @return the names
-	 * that were exported.
-	 */
 }

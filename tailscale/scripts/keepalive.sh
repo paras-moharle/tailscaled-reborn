@@ -77,6 +77,11 @@ _since_update=0
 while true; do
 	sleep "$INTERVAL"
 
+	# settings.sh was sourced once, at boot. Its clock is a snapshot, and a
+	# supervisor that runs for days would otherwise log every line at the
+	# minute it started.
+	CURRENT_TIME=$(date +"%H:%M:%S" 2>/dev/null || echo "--:--:--")
+
 	_since_update=$((_since_update + 1))
 	if [ "$_since_update" -ge "$_UPDATE_EVERY" ]; then
 		_since_update=0
@@ -91,13 +96,8 @@ while true; do
 	fi
 
 	# Whether the user wants the daemon up. A stopped daemon is not a
-	# stopped module: the clipboard -- recording what is copied, whatever
-	# the network is doing -- is module work, and it used to lose its
-	# supervision the moment the daemon was off, because the check for
-	# the daemon's state exited the cycle before the clipboard was ever
-	# looked at. The daemon is one thing this cycle looks after; the
-	# clipboard and the receiver are the others, and they are looked
-	# after in every cycle the module is enabled.
+	# stopped module: the receiver and the supervisor are module work, and
+	# they are looked after in every cycle the module is enabled.
 	_want_daemon=1
 	if [ "$(wanted_state)" != "running" ]; then
 		_want_daemon=0
@@ -132,47 +132,6 @@ while true; do
 		fi
 	else
 		ts_module_status running
-	fi
-
-	# The clipboard watcher.
-	#
-	# It is the thing that records what is copied, and it has to be running
-	# for the history to be anything. The daemon and the receiver are not
-	# enough: a phone whose daemon is switched off still records copies, and
-	# a phone whose watcher has died records nothing at all, quietly.
-	if ! busybox pgrep -f 'tailscale/scripts/clipwatch.sh' >/dev/null 2>&1; then
-		log_keepalive "Warning" "The clipboard watcher is not running; starting it again."
-		for _p in $(pgrep -f 'tailscale/scripts/clipwatch.sh' 2>/dev/null); do
-			kill -9 "$_p" 2>/dev/null
-		done
-		nohup "${TS_SCRIPTS_DIR}/clipwatch.sh" >>"/dev/null" 2>&1 &
-		sleep 2
-		if busybox pgrep -f 'tailscale/scripts/clipwatch.sh' >/dev/null 2>&1; then
-			log_keepalive "Info" "The clipboard watcher is running again."
-		else
-			log_keepalive "Error" "The clipboard watcher did not come back up."
-		fi
-	fi
-
-	# The clipboard's crypto desk.
-	#
-	# It is what holds the device's hardware keystore open, so that
-	# recording a copy does not have to wait for a Java program to start --
-	# which on this phone takes a couple of seconds. If it is not running,
-	# the watcher still works, by running the helper on its own every time,
-	# but every copy pays for it.
-	if ! pgrep -f 'com.paras.tailbridge.clip.ClipStore' >/dev/null 2>&1; then
-		log_keepalive "Warning" "The clipboard's crypto desk is not running; starting it again."
-		ensure_clip_dex >/dev/null 2>&1
-		rm -f "${TS_DIR}/clip.port" 2>/dev/null
-		CLASSPATH="${TS_CLIP_DEX_RUN}" nohup app_process /system/bin \
-			com.paras.tailbridge.clip.ClipStore "${TS_DIR}" >>"${TS_RUN_LOG_FILE}" 2>&1 &
-		sleep 2
-		if pgrep -f 'com.paras.tailbridge.clip.ClipStore' >/dev/null 2>&1; then
-			log_keepalive "Info" "The clipboard's crypto desk is running again."
-		else
-			log_keepalive "Error" "The clipboard's crypto desk did not come back up."
-		fi
 	fi
 
 	if ! receiver_running; then

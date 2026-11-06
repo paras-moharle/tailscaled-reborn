@@ -39,39 +39,6 @@ start_receiver() {
   return 0
 }
 
-# The clipboard watcher.
-#
-# It runs the helper that reads the clipboard and records what is copied, so
-# the history is being kept whether or not the app is open. The helper must
-# run as the shell uid; see clipwatch.sh for why running it as root would
-# wipe the user's clipboard.
-start_clipwatch() {
-  for PID in $(pgrep -f '/tailscale/scripts/clipwatch.sh' 2>/dev/null); do
-    [ "$PID" = "$$" ] && continue
-    kill -9 "$PID" 2>/dev/null
-  done
-  nohup "${TS_SCRIPTS_DIR}/clipwatch.sh" >> "/dev/null" 2>&1 &
-  return 0
-}
-
-# The clipboard's crypto desk.
-#
-# It holds the device's hardware keystore open, so that recording a copy
-# does not have to wait for a Java program to start, which takes a couple of
-# seconds on this phone. It is started here rather than left to the
-# supervisor, so that the first copy after a boot is as quick as the rest.
-start_clipdesk() {
-  for PID in $(pgrep -f 'com.paras.tailbridge.clip.ClipStore' 2>/dev/null); do
-    [ "$PID" = "$$" ] && continue
-    kill -9 "$PID" 2>/dev/null
-  done
-  rm -f "${TS_DIR}/clip.port" 2>/dev/null
-  ensure_clip_dex >/dev/null 2>&1
-  CLASSPATH="${TS_CLIP_DEX_RUN}" nohup app_process /system/bin \
-    com.paras.tailbridge.clip.ClipStore "${TS_DIR}" >>"/dev/null" 2>&1 &
-  return 0
-}
-
 # The supervisor. The boot script runs once; anything that kills the daemon
 # after that left the phone with no Tailscale and no error to explain it.
 # This is the thing that notices and puts it back.
@@ -98,10 +65,9 @@ module_version=$(busybox awk -F'=' '!/^ *#/ && /version=/ { print $2 }' "$TS_MOD
 [ -n "$module_version" ] || module_version="unknown"
 log Info "Tailscaled Reborn version : ${module_version}."
 
-# The scratch directory. Clips waiting to be pushed carry copies of
-# whatever was on the clipboard -- once that includes a password -- so the
-# directory holds them at root alone, and 0700 for the directory itself so
-# nobody can even list what is in it.
+# The scratch directory. Files waiting to be pushed carry copies of
+# whatever was shared, so the directory holds them at root alone, and 0700
+# for the directory itself so nobody can even list what is in it.
 mkdir -p "${TS_DIR}/tmp" 2>/dev/null || true
 chmod 0700 "${TS_DIR}/tmp" 2>/dev/null || true
 
@@ -135,5 +101,3 @@ start_service || log Error "The daemon did not start."
 start_inotifyd || log Error "The inotify watcher did not start."
 start_receiver || log Error "The Taildrop receiver did not start."
 start_keepalive || log Error "The supervisor did not start."
-start_clipdesk || log Error "The clipboard's crypto desk did not start."
-start_clipwatch || log Error "The clipboard watcher did not start."

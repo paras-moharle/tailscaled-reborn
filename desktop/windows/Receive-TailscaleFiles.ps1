@@ -1,26 +1,23 @@
 <#
 .SYNOPSIS
-    Pull pending Tailscale file transfers and apply clipboard clips.
+    Pull pending Tailscale file transfers.
 
 .DESCRIPTION
     Runs `tailscale file get` to fetch any files peers have sent to this
-    machine, then scans the staging folder for TBCLIP1 clipboard files.
-    When one is found, the decoded text is placed on the Windows clipboard
-    via Set-Clipboard and the .clip file is removed.
+    machine into %LOCALAPPDATA%\TailBridge\Received.
 
     Safe location: %LOCALAPPDATA%\TailBridge\
 
-    Single-shot mode (default): fetch once, process once, exit.
+    Single-shot mode (default): fetch once and exit.
     Watch mode (-Watch): loop forever, fetching every $IntervalSeconds
-    seconds (default 5) so phone→desktop clips land within about five seconds.
+    seconds (default 5).
 
 .PARAMETER Watch
     Keep running and re-poll for incoming transfers until stopped.
 
 .PARAMETER IntervalSeconds
-    Seconds between polls in watch mode. Default 5 — near-instant clipboard
-    delivery (~5 s latency) while keeping the `tailscale file get` process
-    spawn light enough for everyday use.
+    Seconds between polls in watch mode. Default 5 — quick delivery while
+    keeping the `tailscale file get` process spawn light.
 #>
 [CmdletBinding()]
 param(
@@ -55,43 +52,12 @@ function Find-TailscaleExe {
     return $null
 }
 
-function Process-ClipFile {
-    param([System.IO.FileInfo]$ClipFile)
-    try {
-        $raw   = Get-Content -Path $ClipFile.FullName -Encoding UTF8 -ErrorAction Stop
-        $lines = $raw -split "`n"
-        if ($lines[0].Trim() -ne 'TBCLIP1') { return $false }
-
-        $metaLine = $lines[1].Trim()
-        $meta     = $metaLine | ConvertFrom-Json -ErrorAction Stop
-        $source   = if ($meta.s) { $meta.s } else { 'a peer' }
-
-        $bodyLines = $lines[2..($lines.Length - 1)]
-        $b64       = ($bodyLines -join "`n") -replace "`r",''
-        $decoded   = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64))
-
-        Set-Clipboard -Value $decoded -ErrorAction Stop
-        Write-Log "Clipboard received from $source — set to Windows clipboard."
-        Remove-Item -Path $ClipFile.FullName -Force -ErrorAction SilentlyContinue
-        return $true
-    }
-    catch {
-        Write-Log "Failed to process clip file $($ClipFile.Name): $($_.Exception.Message)"
-        return $false
-    }
-}
-
 function Do-OnePull {
     param([string]$Tailscale)
 
     Push-Location $Script:Received
     & $Tailscale file get 2>&1 | Out-Null
     Pop-Location
-
-    $files = Get-ChildItem -Path $Script:Received -Filter '*.clip' -File -ErrorAction SilentlyContinue
-    foreach ($f in $files) {
-        Process-ClipFile -ClipFile $f
-    }
 }
 
 try {

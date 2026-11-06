@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Installs TailBridge for Windows: File Explorer context menu, logs dir,
-    and an always-on receive watcher so phone→desktop clips land within ~5s.
+    and an always-on receive watcher.
 
 .DESCRIPTION
     Creates %LOCALAPPDATA%\TailBridge\ and registers "Send to Tailscale peer"
@@ -11,9 +11,8 @@
 
 .PARAMETER InstallReceiveWatcher
     Register a Scheduled Task that runs Receive-TailscaleFiles.ps1 -Watch
-    at logon. The watcher polls tailscale every 5 seconds, so a clipboard
-    sent from your phone lands on the Windows clipboard within about five
-    seconds.
+    at logon. The watcher polls tailscale every few seconds so incoming
+    files are fetched without opening anything by hand.
 #>
 [CmdletBinding()]
 param(
@@ -70,18 +69,17 @@ try {
         $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings
         Register-ScheduledTask -TaskName 'TailBridge Receive Watcher' -InputObject $task -Force | Out-Null
         Write-Log 'Scheduled task "TailBridge Receive Watcher" registered.'
-        Write-Log "It polls for incoming files every 2 seconds — phone→desktop clips appear almost instantly."
+        Write-Log "Incoming files are pulled automatically."
     }
 
     Write-Log 'Install complete.'
     Write-Log ""
     Write-Log "Scripts:        $Script:TBDir\"
     Write-Log "Right-click any file or folder -> 'Send to Tailscale peer'."
-    Write-Log "To push clipboard, run: $Script:TBDir\Push-TailscaleClipboard.ps1"
     if ($InstallReceiveWatcher) {
-        Write-Log "Incoming clips are pulled automatically by the watcher (~2 s latency)."
+        Write-Log "Incoming files are pulled automatically by the watcher."
     } else {
-        Write-Log "To pull incoming clips manually, run: $Script:TBDir\Receive-TailscaleFiles.ps1"
+        Write-Log "To pull incoming files manually, run: $Script:TBDir\Receive-TailscaleFiles.ps1"
         Write-Log "To watch continuously, run:   $Script:TBDir\Receive-TailscaleFiles.ps1 -Watch"
     }
 }
