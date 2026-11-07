@@ -144,6 +144,14 @@ jobs:
           files: dist/*.zip
           generate_release_notes: true
           prerelease: ${{ steps.version.outputs.prerelease }}
+          # The repository's "latest" release must stay the daemon build.
+          # /releases/latest and /releases/latest/download/latest.json are how
+          # the binary's own updater and the packaging fallback look for
+          # daemons, and this repo also publishes module zips: without this a
+          # module release became "latest" and those lookups found no
+          # tailscale_<ver>_<arch>.tgz at all. Module updates go through
+          # update.json on main, which does not care about this flag.
+          make_latest: false
           append_body: true
           body: |
             ## Downloads

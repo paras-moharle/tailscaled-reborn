@@ -73,6 +73,11 @@ jobs:
           tag_name: ${{ steps.src.outputs.release }}
           name: tailscaled ${{ steps.src.outputs.tag }} (Android)
           prerelease: ${{ contains(steps.src.outputs.tag, '-') }}
+          # This is the release /releases/latest should resolve to: the
+          # in-binary updater and the packaging fallback both read it looking
+          # for a daemon archive. Module releases pass make_latest: false
+          # (release.yml) so they cannot take the pointer away.
+          make_latest: true
           generate_release_notes: true
           body: |
             Android build of Tailscale, built from upstream `${{ steps.src.outputs.tag }}`
