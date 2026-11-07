@@ -29,6 +29,19 @@ final class Api {
 	}
 
 	/**
+	 * Root works and the module is installed, but a command ran past its
+	 * budget. Its own kind on purpose: the UI must not tell the user their
+	 * module is broken (or that root is missing) because a busy daemon was
+	 * slow to answer, and a retry is safe because the command already
+	 * finished or timed out on the other side.
+	 */
+	static final class Slow extends Exception {
+		Slow(String msg) {
+			super(msg);
+		}
+	}
+
+	/**
 	 * Run one API command and parse its JSON.
 	 *
 	 * <p>Most commands are a status read that answers in well under a second.
@@ -60,7 +73,7 @@ final class Api {
 		} catch (Root.Denied d) {
 			throw d;
 		} catch (Root.Timeout t) {
-			throw new IllegalStateException(t.getMessage());
+			throw new Slow(t.getMessage());
 		} catch (Exception e) {
 			throw new ApiBroken("root is available but the module is not installed or "
 					+ "is broken: " + e, false);
@@ -81,7 +94,7 @@ final class Api {
 			// Genuinely no root. The caller shows the permission screen.
 			throw d;
 		} catch (Root.Timeout t) {
-			throw new IllegalStateException(t.getMessage());
+			throw new Slow(t.getMessage());
 		} catch (Exception e) {
 			throw new ApiBroken("root is available but the module is not installed or "
 					+ "is broken: " + e, false);

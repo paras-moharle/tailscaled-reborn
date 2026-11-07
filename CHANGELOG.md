@@ -1,3 +1,13 @@
+## v1.0.35  2026-11-07
+
+- **A slow daemon is not a broken module.** The offline screen only knew two
+  failures: no root, and the module not answering. A command that ran past its
+  30-second budget fell into the second and told the user to reflash a module
+  that was installed and working -- a daemon still starting, or one busy with
+  a transfer, was enough to trigger it. Timeouts now have their own screen,
+  icon and copy, the message names the real cause, and Retry is the offered
+  action. Nothing about the module or root state is claimed that is not true.
+
 ## v1.0.34  2026-11-07
 
 A full audit of the app, the module scripts and the release automation. No new

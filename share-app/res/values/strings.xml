@@ -156,6 +156,10 @@
 	<string name="module_broken_hint">Root is granted, but the module is not answering. Reflash the module zip.</string>
 	<string name="module_broken_title">Module not\nanswering</string>
 	<string name="module_broken_body">Root is granted, so the app can run, but the Tailscale module did not answer. It may still be starting, or its files are missing. Reflash the module zip if this keeps happening.</string>
+	<string name="daemon_slow_short">Daemon slow to answer</string>
+	<string name="daemon_slow_hint">The module is installed and root works. The daemon did not reply in time; retrying usually works.</string>
+	<string name="daemon_slow_title">The daemon is\nslow to answer</string>
+	<string name="daemon_slow_body">The command was sent to the daemon, but it did not finish in time. A daemon that is still starting or busy with a transfer can take longer than the app is willing to wait. Tap Retry.</string>
 	<string name="retry">Retry</string>
 	<string name="received_files_row">Received files (%d)</string>
 	<string name="received_files_row_none">Received files</string>

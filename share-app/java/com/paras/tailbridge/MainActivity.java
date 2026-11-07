@@ -643,6 +643,8 @@ public class MainActivity extends Activity {
 				st = Api.status();
 			} catch (Api.ApiBroken e) {
 				err = "module: " + e.getMessage();
+			} catch (Api.Slow e) {
+				err = "timeout: " + e.getMessage();
 			} catch (Root.Denied e) {
 				err = getString(R.string.need_root_short);
 			} catch (Exception e) {
@@ -848,13 +850,21 @@ public class MainActivity extends Activity {
 	}
 
 	private void renderOffline(String err) {
-		boolean noRoot = !(err != null && err.startsWith("module"));
+		// Three different failures, three different screens. A command that
+		// timed out is neither "no root" nor "module broken": root works and
+		// the module is installed, the daemon was simply too slow to answer.
+		// Saying "reflash the module" for that sends people to fix something
+		// that is not broken.
+		boolean slow = err != null && err.startsWith("timeout:");
+		String detail = slow ? err.substring("timeout:".length()).trim() : err;
+		boolean noRoot = !slow && !(detail != null && detail.startsWith("module"));
 
-		statusView.setText(getString(noRoot ? R.string.need_root_short
-				: R.string.module_broken_short));
-		versionView.setText(noRoot ? getString(R.string.grant_root)
+		statusView.setText(getString(slow ? R.string.daemon_slow_short
+				: noRoot ? R.string.need_root_short : R.string.module_broken_short));
+		versionView.setText(slow ? getString(R.string.daemon_slow_hint)
+				: noRoot ? getString(R.string.grant_root)
 				: getString(R.string.module_broken_hint));
-		setStatusColor(getColor(noRoot ? R.color.warn : R.color.err));
+		setStatusColor(getColor(slow || noRoot ? R.color.warn : R.color.err));
 
 		pSend.removeAllViews();
 		pSettings.removeAllViews();
@@ -876,15 +886,17 @@ public class MainActivity extends Activity {
 
 		ImageView mark = new ImageView(this);
 		mark.setImageResource(noRoot ? R.drawable.ic_lock : R.drawable.ic_system);
-		mark.setColorFilter(getColor(noRoot ? R.color.text2 : R.color.err));
-		mark.setContentDescription(getString(noRoot
-				? R.string.grant_root : R.string.module_broken_short));
+		mark.setColorFilter(getColor(slow ? R.color.warn
+				: noRoot ? R.color.text2 : R.color.err));
+		mark.setContentDescription(getString(slow ? R.string.daemon_slow_short
+				: noRoot ? R.string.grant_root : R.string.module_broken_short));
 		LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(dp(62), dp(62));
 		llp.bottomMargin = dp(26);
 		box.addView(mark, llp);
 
 		TextView title = new TextView(this);
-		title.setText(noRoot ? R.string.grant_root_title : R.string.module_broken_title);
+		title.setText(slow ? R.string.daemon_slow_title
+				: noRoot ? R.string.grant_root_title : R.string.module_broken_title);
 		title.setTextColor(getColor(R.color.text));
 		title.setTextSize(26);
 		title.setGravity(Gravity.CENTER);
@@ -893,7 +905,8 @@ public class MainActivity extends Activity {
 		box.addView(title);
 
 		TextView body = new TextView(this);
-		body.setText(noRoot ? R.string.grant_root_body : R.string.module_broken_body);
+		body.setText(slow ? R.string.daemon_slow_body
+				: noRoot ? R.string.grant_root_body : R.string.module_broken_body);
 		body.setTextColor(getColor(R.color.text2));
 		body.setTextSize(15);
 		body.setGravity(Gravity.CENTER);
@@ -942,9 +955,10 @@ public class MainActivity extends Activity {
 			box.addView(back);
 		}
 
-		if (err != null && !err.isEmpty() && !err.equals(getString(R.string.need_root_short))) {
+		if (detail != null && !detail.isEmpty()
+				&& !detail.equals(getString(R.string.need_root_short))) {
 			TextView why = new TextView(this);
-			why.setText(err);
+			why.setText(detail);
 			why.setTextColor(getColor(R.color.hint));
 			why.setTextSize(10);
 			why.setGravity(Gravity.CENTER);
