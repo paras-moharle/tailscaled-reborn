@@ -42,7 +42,7 @@ daemon_running() {
 }
 
 receiver_running() {
-	busybox pgrep -f 'tailscaled.receive' >/dev/null 2>&1
+	busybox pgrep -f '/tailscale/scripts/tailscaled.receive' >/dev/null 2>&1
 }
 
 # What the user last asked for. "stopped" means the daemon was switched off
@@ -86,11 +86,18 @@ while true; do
 	if [ "$_since_update" -ge "$_UPDATE_EVERY" ]; then
 		_since_update=0
 		log_keepalive "Info" "Checking for a newer daemon."
-		"${TS_SCRIPTS_DIR}/tailscaled.update" run >>"${TS_RUN_LOG_FILE}" 2>&1 || true
+		"${TS_SCRIPTS_DIR}/tailscaled.update" run --scheduled >>"${TS_RUN_LOG_FILE}" 2>&1 || true
 	fi
 
 	# The module's own off switch.
 	if [ -f "${TS_MOD_DIR}/disable" ]; then
+		# Also stop a daemon that is still up. The inotify watcher normally
+		# does this the moment the file appears, but it is a separate process
+		# and may itself be dead -- and then disabling the module would leave
+		# Tailscale running, which is the opposite of what the toggle says.
+		if daemon_running; then
+			"${TS_SCRIPTS_DIR}/tailscaled.service" stop >>"${TS_RUN_LOG_FILE}" 2>&1
+		fi
 		ts_module_status stopped
 		continue
 	fi

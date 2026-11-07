@@ -133,7 +133,7 @@ TS_MODULE_STATE_FILE="${TS_RUN_DIR}/module.state"
 ts_module_desc() {
 	case "$1" in
 	running)
-		if busybox pgrep -f 'tailscaled.receive' >/dev/null 2>&1; then
+		if busybox pgrep -f '/tailscale/scripts/tailscaled.receive' >/dev/null 2>&1; then
 			printf '[ ✔ tailscaled running · Taildrop ready ] '
 		else
 			printf '[ ✔ tailscaled running · receiver down ] '

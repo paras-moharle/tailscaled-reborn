@@ -42,4 +42,4 @@ sleep 5
 # Keep the daemon binary current. This runs in the background: it can take
 # minutes on a slow link, and the daemon must not wait for it. The updater
 # has its own timeouts, its own health check and its own rollback.
-( "$TS_SCRIPTS/tailscaled.update" run >>"/dev/null" 2>&1 & )
+( "$TS_SCRIPTS/tailscaled.update" run --scheduled >>"/dev/null" 2>&1 & )

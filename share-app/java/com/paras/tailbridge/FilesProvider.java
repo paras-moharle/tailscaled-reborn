@@ -191,13 +191,25 @@ public class FilesProvider extends ContentProvider {
 	@Override
 	public Cursor query(Uri uri, String[] projection, String selection,
 			String[] selectionArgs, String sortOrder) {
-		String[] cols = {OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE};
+		// Honour the caller's projection. A consumer is allowed to ask for any
+		// subset of the OpenableColumns, and a cursor built with fixed columns
+		// would either throw or hand back values under the wrong names.
+		String[] cols = projection != null ? projection
+				: new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE};
 		MatrixCursor c = new MatrixCursor(cols, 1);
 		List<String> seg = uri.getPathSegments();
 		if (seg != null && !seg.isEmpty()) {
 			try {
 				File f = resolve(seg.get(seg.size() - 1));
-				c.addRow(new Object[]{f.getName(), f.length()});
+				Object[] row = new Object[cols.length];
+				for (int i = 0; i < cols.length; i++) {
+					if (OpenableColumns.DISPLAY_NAME.equals(cols[i])) {
+						row[i] = f.getName();
+					} else if (OpenableColumns.SIZE.equals(cols[i])) {
+						row[i] = f.length();
+					}
+				}
+				c.addRow(row);
 			} catch (Exception ignored) {
 				// empty cursor
 			}

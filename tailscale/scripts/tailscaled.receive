@@ -239,8 +239,12 @@ drain() {
 			exported="${exported}${exported:+, }$(basename "$out")"
 			[ -n "$first" ] || first="$out"
 			# Remember what this was, so that the same delivery found in
-			# the other directory is not exported a second time.
-			fresh="${fresh}${base} ${_size}\n"
+			# the other directory is not exported a second time. The newline
+			# must be a real one: a literal backslash-n made every entry one
+			# long line, so `grep -x` never matched and the inbox copy was
+			# exported again.
+			fresh="${fresh}${base} ${_size}
+"
 		done
 	}
 

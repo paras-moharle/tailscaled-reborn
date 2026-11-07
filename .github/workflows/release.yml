@@ -3,6 +3,10 @@ on:
   push:
     tags:
       - 'v*'
+      # Daemon builds are tagged v<version>-android and have their own
+      # workflow. Without this exclusion this job also ran for them and tried
+      # to publish a module whose version is not a module version at all.
+      - '!v*-android'
   workflow_dispatch:
     inputs:
       bump:
@@ -13,7 +17,6 @@ on:
           - major
           - minor
           - patch
-          - build
         default: 'none'
 permissions:
   contents: write
@@ -28,35 +31,32 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.bump != 'none'
         run: ./.github/tools/version-bump.sh ${{ inputs.bump }}
 
-      - name: Sync version from tag
+      # A tag must describe the commit it points at. Rewriting module.prop on a
+      # tag checkout and pushing it to main leaves the tag pointing at a commit
+      # whose module.prop still says the old version, which is exactly the
+      # "manager offers the wrong update" bug. Refuse instead.
+      - name: Verify version matches tag
         if: github.event_name == 'push'
         run: |
           TAG_VERSION="${GITHUB_REF#refs/tags/}"
           CURRENT_VERSION=$(grep '^version=' module.prop | cut -d'=' -f2)
           if [[ "$TAG_VERSION" != "$CURRENT_VERSION" ]]; then
-            echo "Tag $TAG_VERSION doesn't match module.prop $CURRENT_VERSION, updating..."
-            VERSION_NUM=${TAG_VERSION#v}
-            IFS='.' read -r MAJOR MINOR PATCH BUILD <<< "$VERSION_NUM"
-            VERSION_CODE=$(printf "%02d%02d%02d%02d" "$MAJOR" "$MINOR" "$PATCH" "$BUILD")
-            sed -i "s/^version=.*/version=$TAG_VERSION/" module.prop
-            sed -i "s/^versionCode=.*/versionCode=$VERSION_CODE/" module.prop
+            echo "::error::Tag $TAG_VERSION does not match module.prop $CURRENT_VERSION. Bump the version and tag the bumped commit."
+            exit 1
           fi
 
       - name: Get version
         id: version
         run: |
           VERSION=$(grep '^version=' module.prop | cut -d'=' -f2)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          # Check if it's a build release. Version is vMAJOR.MINOR.PATCH, with an
-          # optional fourth .BUILD component; an absent component is 0, not a
-          # prerelease. Reading f4 of a 3-part version returns "" and used to
-          # mark every release a prerelease.
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # vMAJOR.MINOR.PATCH is a stable module release. A fourth component
+          # (v1.0.34.1) is a build release and is marked prerelease.
           BUILD=$(echo "$VERSION" | cut -d'.' -f4)
-          [ -z "$BUILD" ] && BUILD=0
-          if [ "$BUILD" != "0" ]; then
-            echo "prerelease=true" >> $GITHUB_OUTPUT
+          if [ -n "$BUILD" ] && [ "$BUILD" != "0" ]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
-            echo "prerelease=false" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set up JDK
@@ -97,8 +97,46 @@ jobs:
       - name: Build
         run: ./.github/tools/build.sh
 
+      # The feed is written before the release, from the files we actually
+      # built, so it never points at an asset that was skipped. It also no
+      # longer depends on `steps.release.outputs.assets`, which was empty on
+      # some runs and produced a null zipUrl.
+      - name: Update the update feed
+        run: |
+          VERSION=$(grep '^version=' module.prop | cut -d'=' -f2)
+          VCODE=$(grep '^versionCode=' module.prop | cut -d'=' -f2)
+          REPO="${GITHUB_REPOSITORY,,}"
+          ZIP="Tailscaled-Reborn-${VERSION}.zip"
+          # Prefer the -full zip: the slim one downloads the daemon during
+          # install and fails on devices whose installer has no HTTPS-capable
+          # wget, which is most modern Android.
+          if [ -f "dist/Tailscaled-Reborn-${VERSION}-full.zip" ]; then
+            ZIP="Tailscaled-Reborn-${VERSION}-full.zip"
+          fi
+          ZIP_URL="https://github.com/${REPO}/releases/download/${VERSION}/${ZIP}"
+          CHANGELOG="https://raw.githubusercontent.com/${REPO}/main/CHANGELOG.md"
+          jq --arg url "$ZIP_URL" --arg v "$VERSION" --arg c "$VCODE" --arg ch "$CHANGELOG" \
+             '.version = $v | .versionCode = $c | .zipUrl = $url | .changelog = $ch' \
+             update.json > update.json.tmp && mv update.json.tmp update.json
+          echo "update.json now:"
+          cat update.json
+
+      # Push the feed (and any version bump) BEFORE creating the release. The
+      # release tag is then created on this commit rather than the one before
+      # it. On a tag push the checkout is detached, so push explicitly to main.
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add module.prop update.json CHANGELOG.md
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Release ${{ steps.version.outputs.version }}"
+            git push origin HEAD:main
+          fi
+
       - name: Create Release
-        id: release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.version }}
@@ -111,44 +149,7 @@ jobs:
             ## Downloads
             - **Tailscaled-Reborn-${{ steps.version.outputs.version }}.zip** - Lightweight (downloads binaries on install)
             - **Tailscaled-Reborn-${{ steps.version.outputs.version }}-full.zip** - Complete package (includes all binaries)
-            
+
             ## Download Stats
-            ![GitHub Downloads](https://img.shields.io/github/downloads/paras-moharle/tailscaled-reborn/${{ steps.version.outputs.version }}/Tailscaled-Reborn-${{ steps.version.outputs.version }}.zip?style=flat&logo=docusign&logoColor=green&label=Lightweight)
-            ![GitHub Downloads](https://img.shields.io/github/downloads/paras-moharle/tailscaled-reborn/${{ steps.version.outputs.version }}/Tailscaled-Reborn-${{ steps.version.outputs.version }}-full.zip?style=flat&logo=docusign&logoColor=green&label=Full%20Package)
-
-      - name: Update the update feed
-        env:
-          ASSETS: ${{ steps.release.outputs.assets }}
-        run: |
-          # Must set version AND versionCode, not just the URL. A feed that
-          # keeps an older versionCode is worse than no feed at all: every
-          # manager then offers "update" and would install a stale build.
-          #
-          # Prefer the -full zip: the slim one downloads the daemon during
-          # install and fails on devices whose installer has no HTTPS-capable
-          # wget, which is most modern Android.
-          ZIP_URL=$(echo "$ASSETS" | jq -r '
-            [ .[] | select(.name | endswith(".zip")) ] as $z
-            | (($z[] | select(.name | contains("-full"))) // $z[0]) | .browser_download_url')
-          VERSION=$(grep '^version=' module.prop | cut -d= -f2)
-          VCODE=$(grep '^versionCode=' module.prop | cut -d= -f2)
-          CHANGELOG="https://raw.githubusercontent.com/${GITHUB_REPOSITORY,,}/main/CHANGELOG.md"
-          jq --arg url "$ZIP_URL" --arg v "$VERSION" --arg c "$VCODE" --arg ch "$CHANGELOG" \
-             '.version = $v | .versionCode = $c | .zipUrl = $url | .changelog = $ch' \
-             update.json > update.json.tmp && mv update.json.tmp update.json
-          echo "update.json now:"
-          cat update.json
-
-      - name: Commit changes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add module.prop update*.json CHANGELOG.md
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Bump version to ${{ steps.version.outputs.version }}"
-            if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-              git push
-            fi
-          fi
+            ![GitHub Downloads](https://img.shields.io/github/downloads/${{ github.repository }}/${{ steps.version.outputs.version }}/Tailscaled-Reborn-${{ steps.version.outputs.version }}.zip?style=flat&logo=docusign&logoColor=green&label=Lightweight)
+            ![GitHub Downloads](https://img.shields.io/github/downloads/${{ github.repository }}/${{ steps.version.outputs.version }}/Tailscaled-Reborn-${{ steps.version.outputs.version }}-full.zip?style=flat&logo=docusign&logoColor=green&label=Full%20Package)

@@ -306,7 +306,7 @@ public final class Sheet {
 			return;
 		}
 		closing = true;
-		if (!d.isShowing()) {
+		if (a.isFinishing() || a.isDestroyed() || !d.isShowing()) {
 			return;
 		}
 		card.animate()
@@ -322,8 +322,18 @@ public final class Sheet {
 	}
 
 	public Sheet show() {
+		// A refresh can finish after the activity is gone (back press while a
+		// transfer was running). Showing a dialog on a dead window token throws
+		// BadTokenException from inside the UI thread, so refuse quietly.
+		if (a.isFinishing() || a.isDestroyed()) {
+			return this;
+		}
 		if (!d.isShowing()) {
-			d.show();
+			try {
+				d.show();
+			} catch (Exception ignored) {
+				return this;
+			}
 		}
 		if (head.getVisibility() == View.VISIBLE && body.getChildCount() > 0) {
 			body.setPadding(0, dp(a, 18), 0, 0);

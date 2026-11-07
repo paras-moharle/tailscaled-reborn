@@ -59,6 +59,8 @@ final class Api {
 			return Root.sh(cmd.toString(), timeoutMs).trim();
 		} catch (Root.Denied d) {
 			throw d;
+		} catch (Root.Timeout t) {
+			throw new IllegalStateException(t.getMessage());
 		} catch (Exception e) {
 			throw new ApiBroken("root is available but the module is not installed or "
 					+ "is broken: " + e, false);
@@ -78,6 +80,8 @@ final class Api {
 		} catch (Root.Denied d) {
 			// Genuinely no root. The caller shows the permission screen.
 			throw d;
+		} catch (Root.Timeout t) {
+			throw new IllegalStateException(t.getMessage());
 		} catch (Exception e) {
 			throw new ApiBroken("root is available but the module is not installed or "
 					+ "is broken: " + e, false);

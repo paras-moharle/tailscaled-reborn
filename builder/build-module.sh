@@ -38,11 +38,22 @@ say "==> building TailBridge"
 
 mod_version="$(sed -n 's/^version=//p' "$root/module.prop" | head -1)"
 apk_version=""
-if command -v aapt >/dev/null 2>&1; then
-	apk_version="$(aapt dump badging "$apk" 2>/dev/null |
-		sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -1)"
-elif command -v aapt2 >/dev/null 2>&1; then
-	apk_version="$(aapt2 dump badging "$apk" 2>/dev/null |
+# Find aapt/aapt2 on PATH, or in the SDK build-tools. Neither is on PATH in
+# GitHub's android-actions setup, so this guard used to be skipped exactly
+# where it mattered.
+_aapt=""
+for _c in aapt aapt2; do
+	command -v "$_c" >/dev/null 2>&1 && { _aapt="$_c"; break; }
+done
+if [ -z "$_aapt" ]; then
+	_sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Android/Sdk}}"
+	for _c in aapt aapt2; do
+		_f="$(find "$_sdk/build-tools" -maxdepth 2 -type f -name "$_c" 2>/dev/null | sort -V | tail -1)"
+		[ -n "$_f" ] && { _aapt="$_f"; break; }
+	done
+fi
+if [ -n "$_aapt" ]; then
+	apk_version="$("$_aapt" dump badging "$apk" 2>/dev/null |
 		sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -1)"
 fi
 if [ -n "$apk_version" ] && [ "$apk_version" != "$mod_version" ]; then

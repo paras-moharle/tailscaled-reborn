@@ -74,17 +74,54 @@ public class TailscaleDocuments extends DocumentsProvider {
 				DocumentsContract.Document.COLUMN_MIME_TYPE,
 				DocumentsContract.Document.COLUMN_SIZE,
 				DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+				DocumentsContract.Document.COLUMN_FLAGS,
 		};
 	}
 
-	private void fill(MatrixCursor c, File f, String id) {
-		c.addRow(new Object[]{
-				id,
-				f.getName(),
-				f.isDirectory() ? DocumentsContract.Document.MIME_TYPE_DIR : mimeOf(f.getName()),
-				f.isDirectory() ? null : f.length(),
-				f.lastModified(),
-		});
+	private static String[] rootCols() {
+		return new String[]{
+				DocumentsContract.Root.COLUMN_ROOT_ID,
+				DocumentsContract.Root.COLUMN_DOCUMENT_ID,
+				DocumentsContract.Root.COLUMN_TITLE,
+				DocumentsContract.Root.COLUMN_SUMMARY,
+				DocumentsContract.Root.COLUMN_ICON,
+				DocumentsContract.Root.COLUMN_AVAILABLE_BYTES,
+				DocumentsContract.Root.COLUMN_FLAGS,
+		};
+	}
+
+	/**
+	 * A cursor whose columns are exactly what the caller asked for.
+	 *
+	 * <p>The caller chooses the projection -- a file browser routinely asks
+	 * for columns this provider has no data for -- so rows must be built by
+	 * name. Filling a MatrixCursor positionally with a fixed set of values
+	 * throws as soon as the two disagree, which is every real file browser.
+	 */
+	private static MatrixCursor cursor(String[] projection, String[] defaults) {
+		return new MatrixCursor(projection != null ? projection : defaults, 1);
+	}
+
+	private static void row(MatrixCursor c, java.util.Map<String, Object> values) {
+		String[] names = c.getColumnNames();
+		Object[] out = new Object[names.length];
+		for (int i = 0; i < names.length; i++) {
+			out[i] = values.get(names[i]);
+		}
+		c.addRow(out);
+	}
+
+	private java.util.Map<String, Object> docValues(File f, String id) {
+		java.util.Map<String, Object> v = new java.util.HashMap<>();
+		boolean dir = f.isDirectory();
+		v.put(DocumentsContract.Document.COLUMN_DOCUMENT_ID, id);
+		v.put(DocumentsContract.Document.COLUMN_DISPLAY_NAME, f.getName());
+		v.put(DocumentsContract.Document.COLUMN_MIME_TYPE,
+				dir ? DocumentsContract.Document.MIME_TYPE_DIR : mimeOf(f.getName()));
+		v.put(DocumentsContract.Document.COLUMN_SIZE, dir ? null : f.length());
+		v.put(DocumentsContract.Document.COLUMN_LAST_MODIFIED, f.lastModified());
+		v.put(DocumentsContract.Document.COLUMN_FLAGS, 0);
+		return v;
 	}
 
 	static String mimeOf(String name) {
@@ -123,42 +160,41 @@ public class TailscaleDocuments extends DocumentsProvider {
 
 	@Override
 	public Cursor queryRoots(String[] projection) {
-		String[] p = projection != null ? projection : new String[]{
-				DocumentsContract.Root.COLUMN_ROOT_ID,
-				DocumentsContract.Root.COLUMN_TITLE,
-				DocumentsContract.Root.COLUMN_SUMMARY,
-				DocumentsContract.Root.COLUMN_ICON,
-		};
-		MatrixCursor c = new MatrixCursor(p, 1);
+		MatrixCursor c = cursor(projection, rootCols());
 		File dir = root();
-		c.addRow(new Object[]{
-				ROOT_ID,
-				dir.getName(),
-				dir.getAbsolutePath(),
-				null,
-		});
+		java.util.Map<String, Object> v = new java.util.HashMap<>();
+		v.put(DocumentsContract.Root.COLUMN_ROOT_ID, ROOT_ID);
+		v.put(DocumentsContract.Root.COLUMN_DOCUMENT_ID, ROOT_ID);
+		v.put(DocumentsContract.Root.COLUMN_TITLE, dir.getName());
+		v.put(DocumentsContract.Root.COLUMN_SUMMARY, dir.getAbsolutePath());
+		v.put(DocumentsContract.Root.COLUMN_ICON, null);
+		v.put(DocumentsContract.Root.COLUMN_AVAILABLE_BYTES, dir.getUsableSpace());
+		v.put(DocumentsContract.Root.COLUMN_FLAGS, DocumentsContract.Root.FLAG_LOCAL_ONLY);
+		row(c, v);
 		return c;
 	}
 
 	public Cursor queryRootDocuments(String[] projection, String sortOrder) {
-		MatrixCursor c = new MatrixCursor(projection != null ? projection : cols(), 1);
+		MatrixCursor c = cursor(projection, cols());
 		File dir = root();
-		c.addRow(new Object[]{
-				ROOT_ID,
-				dir.getName(),
-				DocumentsContract.Document.MIME_TYPE_DIR,
-				null,
-				dir.lastModified(),
-		});
+		java.util.Map<String, Object> v = new java.util.HashMap<>();
+		v.put(DocumentsContract.Document.COLUMN_DOCUMENT_ID, ROOT_ID);
+		v.put(DocumentsContract.Document.COLUMN_DISPLAY_NAME, dir.getName());
+		v.put(DocumentsContract.Document.COLUMN_MIME_TYPE,
+				DocumentsContract.Document.MIME_TYPE_DIR);
+		v.put(DocumentsContract.Document.COLUMN_SIZE, null);
+		v.put(DocumentsContract.Document.COLUMN_LAST_MODIFIED, dir.lastModified());
+		v.put(DocumentsContract.Document.COLUMN_FLAGS, 0);
+		row(c, v);
 		return c;
 	}
 
 	@Override
 	public Cursor queryDocument(String documentId, String[] projection) {
-		MatrixCursor c = new MatrixCursor(projection != null ? projection : cols(), 1);
+		MatrixCursor c = cursor(projection, cols());
 		try {
 			File f = fileFor(documentId);
-			fill(c, f, ROOT_ID.equals(documentId) ? ROOT_ID : f.getName());
+			row(c, docValues(f, ROOT_ID.equals(documentId) ? ROOT_ID : f.getName()));
 		} catch (FileNotFoundException e) {
 			// an unknown id yields an empty cursor rather than crashing
 		}
@@ -168,7 +204,7 @@ public class TailscaleDocuments extends DocumentsProvider {
 	@Override
 	public Cursor queryChildDocuments(String parentDocumentId, String[] projection,
 			String sortOrder) {
-		MatrixCursor c = new MatrixCursor(projection != null ? projection : cols());
+		MatrixCursor c = cursor(projection, cols());
 		try {
 			File dir = fileFor(parentDocumentId);
 			if (!dir.isDirectory()) {
@@ -180,7 +216,7 @@ public class TailscaleDocuments extends DocumentsProvider {
 			}
 			java.util.Arrays.sort(kids, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
 			for (File f : kids) {
-				fill(c, f, f.getName());
+				row(c, docValues(f, f.getName()));
 			}
 		} catch (FileNotFoundException ignored) {
 			// empty cursor
@@ -204,8 +240,16 @@ public class TailscaleDocuments extends DocumentsProvider {
 	@Override
 	public boolean isChildDocument(String parentDocumentId, String documentId) {
 		try {
-			return fileFor(parentDocumentId).isDirectory();
-		} catch (FileNotFoundException e) {
+			File parent = fileFor(parentDocumentId);
+			if (!parent.isDirectory()) {
+				return false;
+			}
+			if (ROOT_ID.equals(documentId)) {
+				return false;
+			}
+			File child = fileFor(documentId);
+			return parent.getCanonicalFile().equals(child.getParentFile());
+		} catch (Exception e) {
 			return false;
 		}
 	}

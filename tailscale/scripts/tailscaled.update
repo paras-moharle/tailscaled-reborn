@@ -238,13 +238,13 @@ cmd_check() {
 # was the reason. On a device this happened to, the update failed at boot and
 # the daemon never came up again until the next reboot.
 ensure_daemon_running() {
-	if busybox pgrep -f 'tailscaled -no-logs' >/dev/null 2>&1; then
+	if busybox pgrep -x tailscaled >/dev/null 2>&1; then
 		return 0
 	fi
 	log Warning "The daemon is not running; starting it."
 	"${TS_SCRIPTS_DIR}/tailscaled.service" start >>"${TS_RUN_LOG_FILE}" 2>&1 || true
 	sleep 3
-	if busybox pgrep -f 'tailscaled -no-logs' >/dev/null 2>&1; then
+	if busybox pgrep -x tailscaled >/dev/null 2>&1; then
 		log Info "The daemon is running again."
 		return 0
 	fi
@@ -253,6 +253,15 @@ ensure_daemon_running() {
 }
 
 cmd_run() {
+	# Scheduled runs come from boot and the keepalive loop. `TS_UPDATE_AUTO=false`
+	# in settings.sh is the user's opt-out, and it has to cover those two --
+	# otherwise the setting only silenced the status line. `run` from the app
+	# or a terminal has no flag and always goes ahead.
+	if [ "${1:-}" = "--scheduled" ] && [ "${TS_UPDATE_AUTO:-true}" != "true" ]; then
+		log Info "Automatic updates are disabled (TS_UPDATE_AUTO=false); not checking."
+		return 0
+	fi
+
 	_cur="$(current_version)"
 
 	# Wait for the feed rather than giving up on it.
@@ -420,7 +429,14 @@ _fetch_new_binary() {
 	if timeout 60 busybox wget -q -O "${dl_work}/SHA256SUMS" "$_sum_url" 2>/dev/null; then
 		_want="$(grep " ${_asset}\$" "${dl_work}/SHA256SUMS" 2>/dev/null | head -1 | awk '{print $1}')"
 		if [ -n "$_want" ]; then
-			_got="$(sha256sum "${dl_work}/bin.tgz" 2>/dev/null | awk '{print $1}')"
+			# toybox has sha256sum on modern Android, but a stripped ROM may
+			# only carry busybox's. Without a fallback the check silently
+			# produced an empty hash and accepted the download unverified.
+			if command -v sha256sum >/dev/null 2>&1; then
+				_got="$(sha256sum "${dl_work}/bin.tgz" 2>/dev/null | awk '{print $1}')"
+			else
+				_got="$(busybox sha256sum "${dl_work}/bin.tgz" 2>/dev/null | awk '{print $1}')"
+			fi
 			if [ -n "$_got" ] && [ "$_got" != "$_want" ]; then
 				log Error "Checksum mismatch for ${_asset}; refusing to install."
 				return 1
@@ -482,7 +498,10 @@ check)
 	}
 	cmd_check
 	;;
-run) cmd_run ;;
+run)
+	shift
+	cmd_run "$@"
+	;;
 rollback) cmd_rollback ;;
 *)
 	echo "${yellow}usage:${normal} tailscaled.update {${orange}status${normal}|${orange}check${normal}|${orange}run${normal}|${orange}rollback${normal}}"

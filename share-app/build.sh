@@ -15,17 +15,37 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="$HERE/build"
 SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Android/Sdk}}"
 
-# Pick the newest installed build-tools and platform.
-BT_VER="$(ls "$SDK/build-tools" | sort -V | tail -1)"
+# Pick the newest installed build-tools and platform. Check the directories
+# first: `ls` under `set -e` used to abort with a bare "No such file or
+# directory" that said nothing about what to install.
+[ -d "$SDK/build-tools" ] || {
+	echo "!! no build-tools under $SDK (set ANDROID_SDK_ROOT)" >&2
+	exit 1
+}
+[ -d "$SDK/platforms" ] || {
+	echo "!! no platforms under $SDK (set ANDROID_SDK_ROOT)" >&2
+	exit 1
+}
+BT_VER="$(ls "$SDK/build-tools" | grep -E '^[0-9]+(\.[0-9]+)+$' | sort -V | tail -1)"
 PLATFORM_VER="${2:-$(ls "$SDK/platforms" | grep -E '^android-[0-9]+$' | sed 's/android-//' | sort -n | tail -1)}"
+[ -n "$BT_VER" ] || { echo "!! no versioned build-tools under $SDK/build-tools" >&2; exit 1; }
+[ -n "$PLATFORM_VER" ] || { echo "!! no android-N platform under $SDK/platforms" >&2; exit 1; }
 BT="$SDK/build-tools/$BT_VER"
 JAR="$SDK/platforms/android-$PLATFORM_VER/android.jar"
+# Compile against the newest installed platform, but target the SDK the app was
+# written for. Targeting 35 turns on Android 15's forced edge-to-edge layout,
+# which draws this custom UI under the status and navigation bars; CI builds
+# with android-34, so pin it here too and keep local and release APKs identical.
+TARGET_SDK="${TARGET_SDK:-34}"
+case "$TARGET_SDK" in
+'' | *[!0-9]*) echo "!! TARGET_SDK must be a number, got '$TARGET_SDK'" >&2; exit 1 ;;
+esac
 
 [ -d "$BT" ] || { echo "!! no build-tools in $SDK" >&2; exit 1; }
 [ -f "$JAR" ] || { echo "!! no platform android-$PLATFORM_VER in $SDK" >&2; exit 1; }
 
 echo "==> toolchain"
-echo "    build-tools $BT_VER, platform android-$PLATFORM_VER"
+echo "    build-tools $BT_VER, platform android-$PLATFORM_VER, target $TARGET_SDK"
 
 APK_NAME="TailBridge"
 KS_DIR="$HERE/keystore"
@@ -89,7 +109,7 @@ echo "    version $MOD_VERSION ($MOD_VERSION_CODE)"
 	-I "$JAR" \
 	--manifest "$MANIFEST" \
 	--min-sdk-version 26 \
-	--target-sdk-version "$PLATFORM_VER" \
+	--target-sdk-version "$TARGET_SDK" \
 	-R "$OUT/res.zip" \
 	--java "$OUT/gen" \
 	--auto-add-overlay
@@ -124,19 +144,11 @@ echo "==> aligning"
 "$BT/zipalign" -f -p 4 "$OUT/$APK_NAME-unsigned.apk" "$OUT/$APK_NAME-aligned.apk"
 
 # ------------------------------------------------------------------ signing
-if [ ! -f "$KS" ]; then
-	echo "==> generating signing key"
-	mkdir -p "$KS_DIR"
-	keytool -genkeypair -v \
-		-keystore "$KS" \
-		-alias "$ALIAS" \
-		-keyalg RSA -keysize 2048 -validity 10950 \
-		-storepass "$KS_PASS" -keypass "$KS_PASS" \
-		-dname "CN=Tailscale Share, OU=Magisk-Tailscaled, O=paras-moharle, L=, ST=, C=IN" \
-		>/dev/null 2>&1
-	echo "    created $KS (keep this file to publish updates)"
-fi
-
+# The key is guaranteed to exist here: it was generated above, before any
+# compilation. This block used to repeat that generation with a different
+# -dname, so a build that somehow reached it would have produced an APK
+# signed with a different key than the cached one -- exactly the update
+# failure the comments above describe.
 echo "==> signing"
 "$BT/apksigner" sign \
 	--ks "$KS" --ks-pass "pass:$KS_PASS" --key-pass "pass:$KS_PASS" \

@@ -18,6 +18,13 @@ TS_BIN_REPO="${TS_BIN_REPO:-paras-moharle/tailscaled-reborn}"
 
 mkdir -p "$BIN_DIR" "$DIST_DIR"
 
+# Whatever happens, do not leave downloaded binaries behind. On a failed run
+# they used to sit in tailscale/bin and the next --full build would happily
+# embed them; on a successful run the explicit `rm -f` at the end was skipped
+# by any early exit.
+cleanup_bins() { rm -f "$BIN_DIR"/*; }
+trap cleanup_bins EXIT
+
 echo "Packaging Magisk-Tailscaled ${VERSION}"
 echo "========================================"
 
@@ -105,7 +112,7 @@ echo "- Downloading ${NAME}..."
 	AVAILABLE_ARCH="$AVAILABLE_ARCH $ARCH"
 done
 
-rm -f "$DIST_DIR"/Magisk-Tailscaled-*.zip
+rm -f "$DIST_DIR"/Magisk-Tailscaled-*.zip "$DIST_DIR"/Tailscaled-Reborn-*.zip
 
 # jq is as necessary as tailscaled: customize.sh aborts without it, and
 # "full" has to mean offline-installable. It was never fetched here, so the
@@ -138,8 +145,6 @@ if [ -n "$AVAILABLE_ARCH" ]; then
 else
 	./builder/build-module.sh
 fi
-
-rm -f "$BIN_DIR"/*
 
 echo ""
 echo "TailBridge:  $(ls -lh share-app/build/TailBridge.apk 2>/dev/null | awk '{print $5}')"

@@ -1,5 +1,28 @@
 #!/system/bin/sh
 # Remove everything this module installed.
+#
+# Stop the processes before their files disappear. Removing the directory first
+# left tailscaled itself running from a deleted inode, so uninstalling the
+# module did not actually stop Tailscale until the next reboot -- and the
+# receiver kept exporting into a tree nothing would clean up.
+kill_path() {
+    for PID in $(pgrep -f "$1" 2>/dev/null); do
+        [ "$PID" = "$$" ] && continue
+        kill "$PID" 2>/dev/null
+    done
+    sleep 1
+    for PID in $(pgrep -f "$1" 2>/dev/null); do
+        [ "$PID" = "$$" ] && continue
+        kill -9 "$PID" 2>/dev/null
+    done
+}
+
+# The supervisor first, or it restarts everything killed below.
+kill_path '/tailscale/scripts/keepalive.sh'
+kill_path '/tailscale/scripts/tailscaled.receive'
+kill_path '/tailscale/scripts/tailscaled.inotify'
+kill_path '/tailscale/bin/tailscaled'
+
 rm -rf /data/adb/tailscale
 
 # Older versions of this module moved the boot script into KernelSU's

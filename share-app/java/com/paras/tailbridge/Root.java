@@ -29,6 +29,19 @@ final class Root {
 		}
 	}
 
+	/**
+	 * The command did not finish inside its budget.
+	 *
+	 * <p>Distinct from a dead shell on purpose: a timed-out command may have
+	 * already taken effect (a Taildrop send, a service start), so repeating it
+	 * can duplicate the work. This is never retried.
+	 */
+	static final class Timeout extends Exception {
+		Timeout(String m) {
+			super(m);
+		}
+	}
+
 	// One root shell, kept open.
 	//
 	// Every call used to start a fresh su: a process, a pipe, and a trip
@@ -109,10 +122,13 @@ final class Root {
 					return run(cmd, timeoutMs);
 				} catch (Denied d) {
 					throw d;
+				} catch (Timeout t) {
+					// Never repeat: the command may already have done its work.
+					throw t;
 				} catch (Exception e) {
 					last = e;
-					// The shell died, or the command hung. Start a new one
-					// and try once more.
+					// The shell died. Start a new one and try once more; the
+					// command itself never reached the old shell's output.
 					close();
 				}
 			}
@@ -136,22 +152,40 @@ final class Root {
 		in.flush();
 
 		// A command that hangs must not hang the app. The watchdog closes
-		// the shell, and the read below then fails.
+		// the shell, and the read below then fails. The flag tells the
+		// difference between a hang and a shell that died on its own.
+		final boolean[] timedOut = {false};
 		final Thread watchdog = new Thread(() -> {
 			try {
 				Thread.sleep(timeoutMs);
 			} catch (InterruptedException ignored) {
 				return;
 			}
+			timedOut[0] = true;
 			close();
 		});
 		watchdog.setDaemon(true);
 		watchdog.start();
 		int code = 0;
+		// Hold the reader in a local: close() nulls the field, and the race
+		// between the watchdog and readLine() must not surface as a crash
+		// that then looks like a dead shell and gets retried.
+		final BufferedReader r = out;
 		try {
 			while (true) {
-				String line = out.readLine();
+				String line;
+				try {
+					line = r.readLine();
+				} catch (IOException e) {
+					if (timedOut[0]) {
+						throw new Timeout(timeoutMessage(timeoutMs));
+					}
+					throw e;
+				}
 				if (line == null) {
+					if (timedOut[0]) {
+						throw new Timeout(timeoutMessage(timeoutMs));
+					}
 					throw new IOException("the root shell ended");
 				}
 				if (line.startsWith(MARK)) {
@@ -186,5 +220,9 @@ final class Root {
 
 	static String sh(String cmd) throws Exception {
 		return sh(cmd, 120_000);
+	}
+
+	private static String timeoutMessage(long timeoutMs) {
+		return "the command did not finish in " + (timeoutMs / 1000) + "s";
 	}
 }

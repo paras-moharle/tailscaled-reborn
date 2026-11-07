@@ -80,7 +80,8 @@ version_is_newer() {
 }
 
 module_version() {
-	grep '^version=' "${TS_MOD_DIR}/module.prop" 2>/dev/null | cut -d= -f2 || echo unknown
+	_mv="$(grep '^version=' "${TS_MOD_DIR}/module.prop" 2>/dev/null | cut -d= -f2)"
+	printf '%s' "${_mv:-unknown}"
 }
 
 # --- status -----------------------------------------------------------------
@@ -93,7 +94,7 @@ module_version() {
 # looks at it -- the app polls this every few seconds, and so does any script
 # that asks the daemon how it is.
 supervisor_running() {
-	busybox pgrep -f 'keepalive.sh' >/dev/null 2>&1
+	busybox pgrep -f '/tailscale/scripts/keepalive.sh' >/dev/null 2>&1
 }
 
 ensure_supervisor() {
@@ -249,7 +250,6 @@ api_status() {
 	        lastSeen: (.LastSeen // ""),
         direct: ((.PeerRelay // "") == "" and (.Online // false)),
         curAddr: (.CurAddr // ""),
-        active: (.Active // false),
 	        exitNode: (.ExitNodeOption // false),
 	        active: (.Active // false),
 	        tags: arr(.Tags)
@@ -337,7 +337,7 @@ api_update_check() {
 		# testing `.available == false` would compare a string to a boolean
 		# and quietly get the wrong answer.
 		_avail=false
-		version_is_newer "${_cur:-0}" "$_lv" && _avail=true
+		version_is_newer "$_lv" "${_cur:-0}" && _avail=true
 		printf '{"ok":true,"current":%s,"latest":%s,"available":%s,"source":"feed"}\n' \
 			"$("$JQ" -Rn --arg c "$_cur" '$c')" \
 			"$("$JQ" -Rn --arg l "$_lv" '$l')" \
@@ -370,7 +370,7 @@ api_update_check() {
 		# back as "an update is available" with latest == current. Callers that
 		# trusted the flag alone offered an install of the same binary.
 		_avail2=false
-		[ "$_lv2" != "$_cur" ] && version_is_newer "${_cur:-0}" "$_lv2" && _avail2=true
+		[ "$_lv2" != "$_cur" ] && version_is_newer "$_lv2" "${_cur:-0}" && _avail2=true
 		printf '{"ok":true,"current":%s,"latest":%s,"available":%s,"source":"binary"}\n' \
 			"$("$JQ" -Rn --arg c "$_cur" '$c')" "$("$JQ" -Rn --arg l "$_lv2" '$l')" \
 			"$_avail2"
@@ -577,11 +577,20 @@ api_receive() {
 	chmod 0700 "$_inbox"
 
 	if [ "$_wait" -gt 0 ]; then
+		# `set -e` is on and this is an assignment: without `set +e` a
+		# non-zero timeout or `file get` would abort the whole script before
+		# the JSON below is printed, and the app would report the module as
+		# broken instead of showing the delivery result.
+		set +e
 		_out="$(timeout $((_wait + 10)) "$TS_CLI" file get --wait "$_inbox" 2>&1)"
+		_rc=$?
+		set -e
 	else
+		set +e
 		_out="$(timeout 60 "$TS_CLI" file get "$_inbox" 2>&1)"
+		_rc=$?
+		set -e
 	fi
-	_rc=$?
 
 	printf '{"ok":%s,"dir":%s,"output":%s}\n' \
 		"$([ "$_rc" -eq 0 ] && echo true || echo false)" \

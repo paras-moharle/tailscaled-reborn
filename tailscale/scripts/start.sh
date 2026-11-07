@@ -4,9 +4,12 @@ DIR=$(dirname "$(realpath "$0")")
 . "$DIR"/../settings.sh
 case "$1" in
     postinstall)
+      # Reset the run directory and then carry on into the normal start
+      # sequence below. This used to restart only the daemon and exit, so a
+      # freshly flashed phone had no Taildrop receiver and no supervisor until
+      # its next reboot: files sent in that window were never announced, and a
+      # daemon crash was never noticed.
       rm -rf "$TS_RUN_DIR" && mkdir -p "$TS_RUN_DIR"
-      tailscaled.service restart >> "/dev/null" 2>&1 &
-      return 0
     ;;
 esac
 start_service() {
@@ -24,7 +27,9 @@ start_inotifyd() {
       kill -9 "$PID"
     fi
   done
-  echo "${CURRENT_TIME} [Info]: Starting tailscaled inotify service" > "${TS_RUN_LOG_FILE}"
+  # Append, not truncate: runs.log is rotated (2000 lines kept) rather than
+  # wiped, and this line used to erase that history on every boot.
+  echo "${CURRENT_TIME} [Info]: Starting tailscaled inotify service" >> "${TS_RUN_LOG_FILE}"
   inotifyd "tailscaled.inotify" "${TS_MOD_DIR}" >> "/dev/null" 2>&1 &
   return 0
 }

@@ -1,3 +1,90 @@
+## v1.0.34  2026-11-07
+
+A full audit of the app, the module scripts and the release automation. No new
+features; the point was to remove the ways this could fail quietly.
+
+- **The preference switches can no longer kill the app.** A toggle tapped while
+  the daemon was offline called `setChecked()` from inside its own change
+  listener. That re-entered the listener, which called it again: one tap was
+  enough to recurse until the process died. Offline switches are now disabled
+  and dimmed instead, and a failed write rebuilds the Settings tab from the
+  last state the daemon confirmed rather than detaching the listener and
+  leaving the row dead for the rest of the session.
+- **Root commands distinguish a hang from a dead shell.** Both used to look
+  like the same failure and were retried, so a timed-out `file cp` could be
+  sent twice. A timeout is now its own exception and is never repeated; only a
+  shell that actually died is restarted. The watchdog flag also closes the
+  race where `close()` nulled the reader under a blocked `readLine()`.
+- **"Open folder" opens a folder the app can actually grant.** It built a
+  system storage document URI, which only works for an app that received one
+  through SAF, so the button threw SecurityException and did nothing. It now
+  points at the module's own documents provider.
+- **The document provider honours the caller's projection.** Both providers
+  filled cursors positionally against a fixed column list. Every real file
+  browser asks for a different set and the row is then either rejected or read
+  under the wrong names. Rows are built by column name now, the root reports
+  its document id, flags and free space, and `isChildDocument` checks the real
+  parent instead of answering "yes" for any directory.
+- **Nothing is sent twice after the process is recreated.** A recreated
+  activity re-captured the launch intent while `onRestoreInstanceState` had
+  already restored the staged files, so an inbound share was staged twice. The
+  intent is captured once, and the chosen devices survive recreation too.
+- **Log timestamps are recognised in both formats.** The daemon writes
+  RFC3339 (`2026-11-07T13:13:47`) and the module scripts write
+  `2026/11/07 13:13:47`; the highlighter only knew the second, so daemon lines
+  were painted as one flat block.
+- **A sheet can no longer crash the app on the way out.** Closing the activity
+  while a refresh or transfer was finishing could show or dismiss a dialog on
+  a dead window token (BadTokenException). Both paths now check that the
+  activity is alive and swallow the token failure.
+- **File transfer results are reported, not swallowed.** `api_receive` ran
+  `file get` under `set -e`; a non-zero exit aborted the script before it
+  printed its JSON, so the app called the whole module broken instead of
+  showing what happened. The duplicate `active` key in the peer JSON is gone,
+  and `module_version` no longer prints an empty string when the file is
+  missing.
+- **Update checks compare versions in the right direction.** `api_update_check`
+  asked whether the *current* version was newer than the latest, so the answer
+  was inverted: the app offered an update when there was none and stayed quiet
+  when there was one. Both the feed and the binary fallback are fixed.
+- **Scheduled updates respect the opt-out.** `TS_UPDATE_AUTO=false` silenced
+  the status line but the boot check and the supervisor's check still ran.
+  Both now pass `--scheduled`, which honours the setting; `run` from the app or
+  a terminal always proceeds.
+- **Stale process matching can no longer fool the supervisor.** `keepalive.sh`,
+  `tailscaled.api` and `settings.sh` matched processes by bare script name, so
+  any unrelated script whose command line contained `tailscaled.receive` or
+  `keepalive.sh` looked like ours. All three match the full module path now,
+  and `pgrep -x tailscaled` is used for the daemon everywhere.
+- **Flashing the module starts the whole stack.** The post-install path
+  restarted the daemon and exited, so a freshly flashed phone had no Taildrop
+  receiver and no supervisor until the next reboot: files sent in that window
+  were never announced and a daemon crash was never noticed. It now continues
+  into the normal start sequence, and the inotify log line appends instead of
+  wiping `runs.log` on every boot.
+- **Disabling the module actually stops Tailscale.** The supervisor honoured
+  `disable` by idling, but left a running daemon up when the inotify watcher
+  was itself dead. It stops the daemon now. Uninstall stops the supervisor,
+  receiver, watcher and daemon before deleting their files, so nothing keeps
+  running from a deleted inode.
+- **The updater verifies downloads without assuming a toybox tool.** If
+  `sha256sum` was absent the digest came back empty and the tarball was
+  accepted unverified; it falls back to busybox now.
+- **The release automation publishes what it actually built.** The release
+  workflow also fired for daemon tags (`v1.104.5-android`), refused to run when
+  the tag and `module.prop` disagreed (instead of rewriting the tag), wrote the
+  feed before creating the release, pushed the checkout explicitly to `main`,
+  and no longer offers a "build" bump that produced a version scheme the
+  module manager does not use. `version-bump.sh` was rewritten for the real
+  three-part version and code (`v1.0.34` / `01000034`).
+- **Builds are reproducible between this machine and CI.** The app build finds
+  the SDK and build-tools instead of assuming they are on `PATH`, compiles
+  against the newest platform but pins `targetSdk 34` (targeting 35 turns on
+  Android 15's forced edge-to-edge and draws the custom UI under the bars), and
+  the duplicated signing-key generation is gone. The module builder locates
+  `aapt`/`aapt2` in the SDK so the APK/module version check is no longer
+  skipped exactly where it matters.
+
 ## v1.0.33  2026-11-06
 
 - **tailscaled 1.104.5.** The daemon is now built from upstream v1.104.5. The

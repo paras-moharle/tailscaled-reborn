@@ -165,7 +165,13 @@ public class MainActivity extends Activity {
 					|| android.content.Intent.ACTION_SEND_MULTIPLE.equals(launch.getAction()))) {
 			shareLaunch = true;
 		}
-		captureShare(launch);
+		// A recreated activity (process death, not rotation: the manifest
+		// handles those) already restores its staged files in
+		// onRestoreInstanceState. Capturing the launch intent again would
+		// append the same share a second time.
+		if (savedInstanceState == null) {
+			captureShare(launch);
+		}
 		tab(0);
 		checkRoot();
 		askNotificationPermission();
@@ -260,6 +266,7 @@ public class MainActivity extends Activity {
 			staged.add(u.toString());
 		}
 		out.putStringArrayList("pending", staged);
+		out.putStringArrayList("pick", new ArrayList<>(lastPick));
 	}
 
 	@Override
@@ -273,6 +280,11 @@ public class MainActivity extends Activity {
 				} catch (Exception ignored) {
 				}
 			}
+		}
+		ArrayList<String> pick = in.getStringArrayList("pick");
+		if (pick != null && !pick.isEmpty()) {
+			lastPick.clear();
+			lastPick.addAll(pick);
 		}
 	}
 
@@ -384,10 +396,9 @@ public class MainActivity extends Activity {
 
 	private void openTaildropFolder() {
 		try {
-			android.net.Uri uri = android.provider.DocumentsContract.buildDocumentUri(
-					"com.android.externalstorage.documents", "primary:Download/Tailscale");
 			Intent i = new Intent(Intent.ACTION_VIEW)
-					.setDataAndType(uri, android.provider.DocumentsContract.Document.MIME_TYPE_DIR)
+					.setDataAndType(TailscaleDocuments.rootUri(),
+							android.provider.DocumentsContract.Document.MIME_TYPE_DIR)
 					.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
 							| Intent.FLAG_ACTIVITY_NEW_TASK);
 			startActivity(i);
@@ -1660,12 +1671,14 @@ public class MainActivity extends Activity {
 	private void addToggle(LinearLayout g, String key, String label, String desc,
 			Map<String, Boolean> flags, boolean online) {
 		android.widget.Switch sw = addSwitch(g, label, desc, flags.getOrDefault(key, false), v -> {
-			if (online) {
-				applyPref(key, String.valueOf(v.isChecked()), label);
-			} else {
-				v.setChecked(!v.isChecked());
-			}
+			// Offline is not a reason to flip the switch back: doing that from
+			// inside its own change listener recursed until the app died. The
+			// switch is disabled instead, so this only fires when a write can
+			// actually reach the daemon.
+			applyPref(key, String.valueOf(v.isChecked()), label);
 		});
+		sw.setEnabled(online);
+		sw.setAlpha(online ? 1f : 0.4f);
 		switches.put(key, sw);
 	}
 
@@ -1683,10 +1696,12 @@ public class MainActivity extends Activity {
 			} catch (Exception e) {
 				ui.post(() -> {
 					toast(getString(R.string.failed, String.valueOf(e.getMessage())));
-					android.widget.Switch sw = switches.get(key);
-					if (sw != null) {
-						sw.setOnCheckedChangeListener(null);
-						sw.setChecked(!sw.isChecked());
+					// Rebuild from the last state the daemon confirmed. The
+					// old path detached the listener and flipped the switch by
+					// hand, which left that row dead for the rest of the
+					// session.
+					if (status != null) {
+						buildSettings(status);
 					}
 				});
 			}
@@ -2045,8 +2060,14 @@ public class MainActivity extends Activity {
 		if (s.length() < 19) {
 			return false;
 		}
-		return Character.isDigit(s.charAt(0)) && s.charAt(4) == '/' && s.charAt(7) == '/'
-				&& s.charAt(10) == ' ' && s.charAt(13) == ':' && s.charAt(16) == ':';
+		// Accept both the daemon's RFC3339 ("2026-11-07T13:13:47") and the
+		// module scripts' classic ("2026/11/07 13:13:47"). Only the date
+		// separator differs; HH:MM:SS sits at the same offsets.
+		boolean dateOk = s.charAt(4) == '/' && s.charAt(7) == '/'
+				|| s.charAt(4) == '-' && s.charAt(7) == '-';
+		boolean sepOk = s.charAt(10) == ' ' || s.charAt(10) == 'T';
+		return Character.isDigit(s.charAt(0)) && dateOk && sepOk
+				&& s.charAt(13) == ':' && s.charAt(16) == ':';
 	}
 
 	private void doLogin() {
@@ -2377,7 +2398,13 @@ public class MainActivity extends Activity {
 		});
 		if (l != null) {
 			row.setClickable(true);
-			row.setOnClickListener(v -> sw.performClick());
+			// The whole row is a bigger target, but a disabled switch must stay
+			// disabled: performClick() does not check enabled itself.
+			row.setOnClickListener(v -> {
+				if (sw.isEnabled()) {
+					sw.performClick();
+				}
+			});
 		}
 		g.addView(row);
 		return sw;
