@@ -1,3 +1,7 @@
+## v1.0.36
+
+- 7b0d54b Material You interface, rebuilt from the colour up
+
 ## v1.0.35  2026-11-07
 
 - **A slow daemon is not a broken module.** The offline screen only knew two

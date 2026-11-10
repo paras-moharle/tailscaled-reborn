@@ -65,7 +65,7 @@ sed -i "s/^versionCode=.*/versionCode=$NEW_VERSION_CODE/" module.prop
 # install filename. Both used to drift several releases behind because no
 # part of the release flow rewrote them.
 if [ -f README.md ]; then
-  sed -i "s|module-v[0-9][0-9.]*-|module-${NEW_VERSION#v}-|" README.md
+  sed -i "s|module-v[0-9][0-9.]*-|module-${NEW_VERSION}-|" README.md
   sed -i "s|Tailscaled-Reborn-v[0-9][0-9.]*-full\.zip|Tailscaled-Reborn-${NEW_VERSION}-full.zip|g" README.md
 fi
 
