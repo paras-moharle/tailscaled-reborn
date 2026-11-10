@@ -5,6 +5,7 @@ package com.paras.tailbridge;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkRequest;
@@ -18,8 +19,6 @@ import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.Button;
-import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -72,7 +71,7 @@ public class MainActivity extends Activity {
 	/** peers ticked as send targets. */
 	private final Set<String> chosen = new LinkedHashSet<>();
 	/** pref key -> the switch showing it, so a failed write can be undone. */
-	private final Map<String, android.widget.Switch> switches = new LinkedHashMap<>();
+	private final Map<String, Ui.Toggle> switches = new LinkedHashMap<>();
 
 	/** Self-name / address values, patched in place by the poller. */
 	private final List<TextView> nameValues = new ArrayList<>();
@@ -90,7 +89,7 @@ public class MainActivity extends Activity {
 	private final View[] navs = new View[3];
 	private int currentTab = 0;
 
-	private Button sendBtn;
+	private TextView sendBtn;
 	/** row that offers the software update once a newer build is known. */
 	private View updateRow;
 	private TextView updateTitle;
@@ -124,6 +123,9 @@ public class MainActivity extends Activity {
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
+		// Resolve Material You before the layout is inflated: the theme
+		// resource has to be in place before the first view exists.
+		Theme.apply(this);
 		setContentView(R.layout.activity_main);
 
 		statusView = findViewById(R.id.status);
@@ -133,6 +135,7 @@ public class MainActivity extends Activity {
 		pSend = findViewById(R.id.pSend);
 		pSettings = findViewById(R.id.pSettings);
 		pSystem = findViewById(R.id.pSystem);
+		styleChrome();
 
 		navs[0] = findViewById(R.id.navSend);
 		navs[1] = findViewById(R.id.navSettings);
@@ -172,7 +175,7 @@ public class MainActivity extends Activity {
 		if (savedInstanceState == null) {
 			captureShare(launch);
 		}
-		tab(0);
+		tab(savedInstanceState == null ? 0 : savedInstanceState.getInt("tab", 0));
 		checkRoot();
 		askNotificationPermission();
 		registerNetworkWatcher();
@@ -267,6 +270,7 @@ public class MainActivity extends Activity {
 		}
 		out.putStringArrayList("pending", staged);
 		out.putStringArrayList("pick", new ArrayList<>(lastPick));
+		out.putInt("tab", currentTab);
 	}
 
 	@Override
@@ -367,6 +371,7 @@ public class MainActivity extends Activity {
 	}
 
 	private void tab(int n) {
+		int prev = currentTab;
 		currentTab = n;
 		ScrollView[] scrolls = {
 				findViewById(R.id.scrollSend),
@@ -374,23 +379,109 @@ public class MainActivity extends Activity {
 				findViewById(R.id.scrollSystem),
 		};
 		for (int i = 0; i < scrolls.length; i++) {
-			scrolls[i].setVisibility(i == n ? View.VISIBLE : View.GONE);
-			int c = getColor(i == n ? R.color.text : R.color.hint);
+			boolean on = i == n;
+			scrolls[i].setVisibility(on ? View.VISIBLE : View.GONE);
+			int iconColor = on ? Theme.onSecondaryContainer : Theme.text2;
+			int labelColor = on ? Theme.text : Theme.text2;
 			ImageView icon = (ImageView) navs[i].findViewById(R.id.navIcon);
 			if (icon != null) {
-				icon.setColorFilter(c);
+				icon.setColorFilter(iconColor);
 			}
 			TextView label = (TextView) navs[i].findViewById(R.id.navLabel);
 			if (label != null) {
-				label.setTextColor(c);
-				label.setTypeface(null, i == n ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
+				label.setTextColor(labelColor);
+				label.setTypeface(null, on
+						? android.graphics.Typeface.BOLD
+						: android.graphics.Typeface.NORMAL);
 			}
 			View pill = navs[i].findViewById(R.id.navPill);
 			if (pill != null) {
-				pill.setVisibility(i == n ? View.VISIBLE : View.INVISIBLE);
+				pill.setVisibility(View.VISIBLE);
+				Ui.indicator(pill, on);
 			}
 		}
+		if (prev != n) {
+			// One short fade up. Switching tabs used to be a hard cut, which
+			// on a dark page reads as a flicker rather than a move.
+			ScrollView now = scrolls[n];
+			now.setAlpha(0f);
+			now.setTranslationY(dp(10));
+			now.animate().alpha(1f).translationY(0f)
+					.setDuration(220).setInterpolator(Ui.EMPHASIZED).start();
+		}
 		buildVisible();
+	}
+
+	/**
+	 * The manifest handles this configuration itself so a rotation does not
+	 * cost a full restart, but the theme is one of the things that changed.
+	 * When the palette follows the system, the activity has to be rebuilt.
+	 */
+	@Override
+	public void onConfigurationChanged(Configuration cfg) {
+		super.onConfigurationChanged(cfg);
+		// uiMode is handled here so a rotation does not restart the app, but
+		// that also means the system flipping light/dark does not restart it.
+		// Rebuild only when the resolved darkness actually changed.
+		if (Theme.mode(this) == Theme.MODE_SYSTEM
+				&& Theme.darkNow(this) != Theme.isDark) {
+			recreate();
+		}
+	}
+
+	/**
+	 * Paint the parts of the layout that were inflated from XML.
+	 *
+	 * <p>The layout is static XML and its colours are first-frame fallbacks;
+	 * every surface with a generated colour is set here, once, before the
+	 * screens are built. Anything built in code reads {@link Theme} directly.
+	 */
+	private void styleChrome() {
+		View root = findViewById(R.id.root);
+		if (root != null) {
+			root.setBackgroundColor(Theme.surface);
+		}
+		if (statusView != null) {
+			statusView.setTextColor(Theme.text);
+		}
+		if (versionView != null) {
+			versionView.setTextColor(Theme.text2);
+		}
+
+		View refresh = findViewById(R.id.refresh);
+		if (refresh instanceof ImageView) {
+			((ImageView) refresh).setColorFilter(Theme.text2);
+			refresh.setBackground(Ui.ripple(this,
+					new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT),
+					Theme.withAlpha(Theme.onSurface, 0x1F), null));
+		}
+		View pull = findViewById(R.id.pullSpinner);
+		if (pull instanceof ImageView) {
+			((ImageView) pull).setColorFilter(Theme.accent);
+		}
+
+		View navBar = findViewById(R.id.navBar);
+		if (navBar != null) {
+			navBar.setBackground(Ui.navBg(this));
+		}
+		int[] navIds = {R.id.navSend, R.id.navSettings, R.id.navSystem};
+		for (int id : navIds) {
+			View nav = findViewById(id);
+			if (nav == null) {
+				continue;
+			}
+			nav.setBackground(Ui.press(this, 20f));
+			View pill = nav.findViewById(R.id.navPill);
+			if (pill != null) {
+				pill.setBackground(Ui.pill(this));
+				pill.setVisibility(View.VISIBLE);
+				pill.setAlpha(0f);
+				View holder = (View) pill.getParent();
+				if (holder != null) {
+					holder.setBackgroundColor(android.graphics.Color.TRANSPARENT);
+				}
+			}
+		}
 	}
 
 
@@ -722,17 +813,17 @@ public class MainActivity extends Activity {
 
 		boolean controlPlane = self != null && self.optBoolean("online", false);
 		if (!up) {
-			setStatusColor(getColor(R.color.err));
+			setStatusColor(Theme.err);
 			versionView.setText(getString(R.string.state_daemon_stopped) + "  ·  tailscaled "
 					+ st.optString("version", "?"));
 		} else if (!signedIn(st)) {
-			setStatusColor(getColor(R.color.warn));
+			setStatusColor(Theme.warn);
 		} else if (!controlPlane) {
-			setStatusColor(getColor(R.color.warn));
+			setStatusColor(Theme.warn);
 			versionView.setText(getString(R.string.state_no_internet) + "  ·  tailscaled "
 					+ st.optString("version", "?"));
 		} else {
-			setStatusColor(getColor(R.color.ok));
+			setStatusColor(Theme.ok);
 		}
 	}
 
@@ -864,7 +955,7 @@ public class MainActivity extends Activity {
 		versionView.setText(slow ? getString(R.string.daemon_slow_hint)
 				: noRoot ? getString(R.string.grant_root)
 				: getString(R.string.module_broken_hint));
-		setStatusColor(getColor(slow || noRoot ? R.color.warn : R.color.err));
+		setStatusColor((slow || noRoot ? Theme.warn : Theme.err));
 
 		pSend.removeAllViews();
 		pSettings.removeAllViews();
@@ -886,8 +977,8 @@ public class MainActivity extends Activity {
 
 		ImageView mark = new ImageView(this);
 		mark.setImageResource(noRoot ? R.drawable.ic_lock : R.drawable.ic_system);
-		mark.setColorFilter(getColor(slow ? R.color.warn
-				: noRoot ? R.color.text2 : R.color.err));
+		mark.setColorFilter(slow ? Theme.warn
+				: noRoot ? Theme.text2 : Theme.err);
 		mark.setContentDescription(getString(slow ? R.string.daemon_slow_short
 				: noRoot ? R.string.grant_root : R.string.module_broken_short));
 		LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(dp(62), dp(62));
@@ -897,7 +988,7 @@ public class MainActivity extends Activity {
 		TextView title = new TextView(this);
 		title.setText(slow ? R.string.daemon_slow_title
 				: noRoot ? R.string.grant_root_title : R.string.module_broken_title);
-		title.setTextColor(getColor(R.color.text));
+		title.setTextColor(Theme.text);
 		title.setTextSize(26);
 		title.setGravity(Gravity.CENTER);
 		title.setLineSpacing(dp(4), 1f);
@@ -907,7 +998,7 @@ public class MainActivity extends Activity {
 		TextView body = new TextView(this);
 		body.setText(slow ? R.string.daemon_slow_body
 				: noRoot ? R.string.grant_root_body : R.string.module_broken_body);
-		body.setTextColor(getColor(R.color.text2));
+		body.setTextColor(Theme.text2);
 		body.setTextSize(15);
 		body.setGravity(Gravity.CENTER);
 		body.setLineSpacing(dp(6), 1f);
@@ -918,15 +1009,8 @@ public class MainActivity extends Activity {
 		blp.rightMargin = dp(12);
 		box.addView(body, blp);
 
-		TextView open = new TextView(this);
-		open.setText(noRoot ? R.string.open_root_manager : R.string.retry);
-		open.setTextColor(getColor(R.color.onAccent));
-		open.setTextSize(16);
-		open.setGravity(Gravity.CENTER);
-		open.setTypeface(null, android.graphics.Typeface.BOLD);
-		open.setBackgroundResource(R.drawable.btn_primary);
-		open.setPadding(dp(16), dp(16), dp(16), dp(16));
-		open.setClickable(true);
+		TextView open = Ui.button(this,
+				getString(noRoot ? R.string.open_root_manager : R.string.retry), true);
 		open.setOnClickListener(v -> {
 			if (noRoot) {
 				openRootManager();
@@ -938,7 +1022,7 @@ public class MainActivity extends Activity {
 			refresh();
 		});
 		LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(
-				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
 		olp.topMargin = dp(28);
 		olp.leftMargin = dp(8);
 		olp.rightMargin = dp(8);
@@ -947,7 +1031,7 @@ public class MainActivity extends Activity {
 		if (noRoot) {
 			TextView back = new TextView(this);
 			back.setText(R.string.grant_root_back);
-			back.setTextColor(getColor(R.color.hint));
+			back.setTextColor(Theme.hint);
 			back.setTextSize(13);
 			back.setGravity(Gravity.CENTER);
 			back.setPadding(dp(16), dp(16), dp(16), dp(0));
@@ -959,7 +1043,7 @@ public class MainActivity extends Activity {
 				&& !detail.equals(getString(R.string.need_root_short))) {
 			TextView why = new TextView(this);
 			why.setText(detail);
-			why.setTextColor(getColor(R.color.hint));
+			why.setTextColor(Theme.hint);
 			why.setTextSize(10);
 			why.setGravity(Gravity.CENTER);
 			why.setPadding(dp(20), dp(20), dp(20), dp(20));
@@ -999,6 +1083,8 @@ public class MainActivity extends Activity {
 			}
 		}
 
+		sendHero();
+
 		if (!daemonUp(status)) {
 			stoppedCard();
 		} else if (!signedIn(status)) {
@@ -1011,7 +1097,7 @@ public class MainActivity extends Activity {
 
 		LinearLayout t = group(pSend, getString(R.string.choose_devices));
 		if (peerList.isEmpty()) {
-			plain(t, getString(R.string.no_peers_short));
+			emptyPeers(t);
 		} else {
 			if (onlinePeers.size() > 1) {
 				t.addView(selectTools());
@@ -1022,23 +1108,159 @@ public class MainActivity extends Activity {
 			}
 		}
 
-		sendBtn = new Button(this);
-		sendBtn.setBackgroundResource(R.drawable.btn_primary);
-		sendBtn.setTextColor(getColor(R.color.onAccent));
-		sendBtn.setTextSize(16);
-		sendBtn.setTypeface(null, android.graphics.Typeface.BOLD);
-		sendBtn.setAllCaps(false);
-		sendBtn.setSingleLine(true);
-		sendBtn.setStateListAnimator(null);
-		sendBtn.setMinWidth(0);
-		sendBtn.setMinHeight(0);
+		// A filled, full-width action. The selector is the signal that the
+		// page has a primary job, so it gets a button and not a row.
+		sendBtn = Ui.button(this, getString(R.string.send_files), false);
 		sendBtn.setOnClickListener(v -> onSendPressed());
 		LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
-				ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
-		slp.topMargin = dp(16);
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(56));
+		slp.topMargin = dp(18);
 		pSend.addView(sendBtn, slp);
 
 		updateSendButton();
+	}
+
+	/** The page's opening panel: what this screen is for, in one breath. */
+	private void sendHero() {
+		LinearLayout hero = Ui.heroCard(this);
+		hero.setPadding(dp(22), dp(22), dp(22), dp(20));
+		pSend.addView(hero, new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+		ImageView mark = new ImageView(this);
+		mark.setImageResource(R.drawable.ic_send);
+		mark.setColorFilter(Theme.accent);
+		mark.setContentDescription(getString(R.string.send_files));
+		mark.setPadding(dp(11), dp(11), dp(11), dp(11));
+		mark.setBackground(Ui.rounded(this, Theme.accentDim, 16f));
+		LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(dp(46), dp(46));
+		mlp.bottomMargin = dp(16);
+		hero.addView(mark, mlp);
+
+		TextView title = Ui.label(this, getString(R.string.send_hero_title), 23f, Theme.text);
+		title.setTypeface(null, android.graphics.Typeface.BOLD);
+		title.setLetterSpacing(-0.02f);
+		hero.addView(title);
+
+		TextView body = Ui.label(this, getString(R.string.send_hero_body), 13.5f, Theme.text2);
+		body.setLineSpacing(dp(4), 1f);
+		body.setPadding(0, dp(8), 0, 0);
+		hero.addView(body);
+
+		LinearLayout stats = new LinearLayout(this);
+		stats.setOrientation(LinearLayout.HORIZONTAL);
+		stats.setGravity(Gravity.CENTER_VERTICAL);
+		stats.setPadding(0, dp(16), 0, 0);
+		boolean anyOnline = !onlinePeers.isEmpty();
+		TextView online = statPill(getString(R.string.send_online, onlinePeers.size()),
+				anyOnline);
+		stats.addView(online);
+		if (!chosen.isEmpty()) {
+			TextView picked = statPill(getString(R.string.send_selected, chosen.size()), true);
+			LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(
+					ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+			plp.leftMargin = dp(8);
+			stats.addView(picked, plp);
+		}
+		hero.addView(stats);
+	}
+
+	private TextView statPill(CharSequence label, boolean lit) {
+		return toneChip(label,
+				lit ? Theme.secondaryContainer : Theme.surfaceContainerHighest,
+				lit ? Theme.onSecondaryContainer : Theme.text2);
+	}
+
+	private TextView toneChip(CharSequence label, int background, int foreground) {
+		TextView t = Ui.label(this, label, 12f, foreground);
+		t.setTypeface(null, android.graphics.Typeface.BOLD);
+		t.setGravity(Gravity.CENTER);
+		t.setPadding(dp(12), dp(7), dp(12), dp(7));
+		t.setBackground(Ui.rounded(this, background, 999f));
+		return t;
+	}
+
+	/** The System page's opening panel: who this device is, and whether it is up. */
+	private void systemHero(JSONObject st) {
+		LinearLayout hero = Ui.heroCard(this);
+		hero.setPadding(dp(22), dp(22), dp(22), dp(20));
+		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		lp.topMargin = dp(6);
+		pSystem.addView(hero, lp);
+
+		JSONObject self = st.optJSONObject("self");
+		String host = self == null ? "" : self.optString("host", "");
+		String ip = tsIpv4(st);
+		boolean up = daemonUp(st);
+
+		TextView name = Ui.label(this,
+				host.isEmpty() ? getString(R.string.this_device) : host, 22f, Theme.text);
+		name.setTypeface(null, android.graphics.Typeface.BOLD);
+		name.setLetterSpacing(-0.02f);
+		name.setSingleLine(true);
+		name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+		hero.addView(name);
+
+		TextView addr = Ui.label(this,
+				ip.isEmpty() ? getString(R.string.not_signed_in) : ip, 13f, Theme.text2);
+		addr.setPadding(0, dp(5), 0, 0);
+		hero.addView(addr);
+
+		LinearLayout chips = new LinearLayout(this);
+		chips.setOrientation(LinearLayout.HORIZONTAL);
+		chips.setGravity(Gravity.CENTER_VERTICAL);
+		chips.setPadding(0, dp(15), 0, 0);
+
+		chips.addView(toneChip(getString(up ? R.string.daemon_running : R.string.daemon_off),
+				up ? Theme.successContainer : Theme.withAlpha(Theme.error, 0x24),
+				up ? Theme.success : Theme.error));
+
+		boolean in = signedIn(st);
+		TextView account = toneChip(getString(in ? R.string.connected : R.string.not_signed_in),
+				in ? Theme.secondaryContainer : Theme.surfaceContainerHighest,
+				in ? Theme.onSecondaryContainer : Theme.text2);
+		LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		alp.leftMargin = dp(8);
+		chips.addView(account, alp);
+
+		if (supervisorUp(st)) {
+			TextView sup = toneChip(getString(R.string.supervisor),
+					Theme.surfaceContainerHighest, Theme.text2);
+			LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+					ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+			slp.leftMargin = dp(8);
+			chips.addView(sup, slp);
+		}
+		hero.addView(chips);
+	}
+
+	/** The device list with nothing in it still has to explain itself. */
+	private void emptyPeers(LinearLayout g) {
+		LinearLayout box = new LinearLayout(this);
+		box.setOrientation(LinearLayout.VERTICAL);
+		box.setGravity(Gravity.CENTER_HORIZONTAL);
+		box.setPadding(dp(24), dp(30), dp(24), dp(30));
+
+		ImageView mark = new ImageView(this);
+		mark.setImageResource(R.drawable.ic_system);
+		mark.setColorFilter(Theme.hint);
+		box.addView(mark, new LinearLayout.LayoutParams(dp(34), dp(34)));
+
+		TextView title = Ui.label(this, getString(R.string.no_peers_short), 16f, Theme.text);
+		title.setTypeface(null, android.graphics.Typeface.BOLD);
+		title.setGravity(Gravity.CENTER);
+		title.setPadding(0, dp(12), 0, 0);
+		box.addView(title);
+
+		TextView sub = Ui.label(this, getString(R.string.no_peers_body), 13f, Theme.text2);
+		sub.setGravity(Gravity.CENTER);
+		sub.setLineSpacing(dp(4), 1f);
+		sub.setPadding(dp(8), dp(6), dp(8), 0);
+		box.addView(sub);
+
+		g.addView(box);
 	}
 
 	/** Select all / none, for sending to more than one device. */
@@ -1070,11 +1292,10 @@ public class MainActivity extends Activity {
 
 	/** What is waiting to go: the files that arrived through the share sheet. */
 	private void pendingCard() {
-		LinearLayout card = new LinearLayout(this);
+		LinearLayout card = Ui.card(this);
 		card.setOrientation(LinearLayout.HORIZONTAL);
 		card.setGravity(Gravity.CENTER_VERTICAL);
-		card.setBackgroundResource(R.drawable.group);
-		card.setPadding(dp(18), dp(16), dp(12), dp(16));
+		card.setPadding(dp(14), dp(14), dp(12), dp(14));
 		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
 				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		lp.topMargin = dp(14);
@@ -1082,23 +1303,19 @@ public class MainActivity extends Activity {
 
 		ImageView icon = new ImageView(this);
 		icon.setImageResource(R.drawable.ic_send);
-		icon.setColorFilter(getColor(R.color.accent));
-		LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(20), dp(20));
+		icon.setColorFilter(Theme.accent);
+		icon.setPadding(dp(9), dp(9), dp(9), dp(9));
+		icon.setBackground(Ui.rounded(this, Theme.accentDim, 12f));
+		LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(40), dp(40));
 		ilp.rightMargin = dp(14);
 		card.addView(icon, ilp);
 
 		LinearLayout col = col();
-		TextView t = new TextView(this);
-		t.setText(getString(R.string.pending_ready, pendingUris.size()));
-		t.setTextColor(getColor(R.color.text));
-		t.setTextSize(15);
-		t.setIncludeFontPadding(false);
+		TextView t = Ui.label(this, getString(R.string.pending_ready, pendingUris.size()),
+				15f, Theme.text);
+		t.setTypeface(null, android.graphics.Typeface.BOLD);
 		col.addView(t);
-		TextView s = new TextView(this);
-		s.setText(R.string.pending_hint);
-		s.setTextColor(getColor(R.color.text2));
-		s.setTextSize(12.5f);
-		s.setIncludeFontPadding(false);
+		TextView s = Ui.label(this, getString(R.string.pending_hint), 12.5f, Theme.text2);
 		s.setPadding(0, dp(3), 0, 0);
 		col.addView(s);
 		card.addView(col, new LinearLayout.LayoutParams(0,
@@ -1115,93 +1332,59 @@ public class MainActivity extends Activity {
 	private boolean receivedChecked;
 
 	private void stoppedCard() {
-		LinearLayout card = new LinearLayout(this);
-		card.setOrientation(LinearLayout.VERTICAL);
-		card.setBackgroundResource(R.drawable.group);
-		card.setPadding(dp(20), dp(22), dp(20), dp(20));
+		LinearLayout card = Ui.heroCard(this);
+		card.setPadding(dp(22), dp(22), dp(22), dp(20));
 		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
 				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		lp.topMargin = dp(14);
 		lp.bottomMargin = dp(8);
 		pSend.addView(card, lp);
 
-		TextView t = new TextView(this);
-		t.setText(R.string.daemon_stopped_card);
-		t.setTextColor(getColor(R.color.text));
-		t.setTextSize(21);
+		TextView t = Ui.label(this, getString(R.string.daemon_stopped_card), 20f, Theme.text);
 		t.setTypeface(null, android.graphics.Typeface.BOLD);
-		t.setIncludeFontPadding(false);
 		card.addView(t);
 
-		TextView d = new TextView(this);
-		d.setText(R.string.daemon_stopped_card_body);
-		d.setTextColor(getColor(R.color.text2));
-		d.setTextSize(14);
+		TextView d = Ui.label(this, getString(R.string.daemon_stopped_card_body), 14f, Theme.text2);
 		d.setLineSpacing(dp(4), 1f);
 		d.setPadding(0, dp(8), 0, 0);
 		card.addView(d);
 
-		TextView go = new TextView(this);
-		go.setText(R.string.start_daemon);
-		go.setTextColor(getColor(R.color.onAccent));
-		go.setTextSize(16);
-		go.setGravity(Gravity.CENTER);
-		go.setTypeface(null, android.graphics.Typeface.BOLD);
-		go.setBackgroundResource(R.drawable.btn_primary);
-		go.setPadding(dp(16), dp(15), dp(16), dp(15));
-		go.setClickable(true);
+		TextView go = Ui.button(this, getString(R.string.start_daemon), true);
 		go.setOnClickListener(v -> service("start"));
 		LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(
-				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(50));
 		glp.topMargin = dp(20);
 		card.addView(go, glp);
 	}
 
 	private void signInCard() {
 		boolean up = daemonUp(status);
-		LinearLayout card = new LinearLayout(this);
-		card.setOrientation(LinearLayout.VERTICAL);
-		card.setBackgroundResource(R.drawable.group);
-		card.setPadding(dp(20), dp(22), dp(20), dp(20));
+		LinearLayout card = Ui.heroCard(this);
+		card.setPadding(dp(22), dp(22), dp(22), dp(20));
 		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
 				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		lp.topMargin = dp(14);
 		lp.bottomMargin = dp(8);
 		pSend.addView(card, lp);
 
-		TextView t = new TextView(this);
-		t.setText(R.string.not_signed_in);
-		t.setTextColor(getColor(R.color.text));
-		t.setTextSize(21);
+		TextView t = Ui.label(this, getString(R.string.not_signed_in), 20f, Theme.text);
 		t.setTypeface(null, android.graphics.Typeface.BOLD);
 		card.addView(t);
 
-		TextView d = new TextView(this);
-		d.setText(R.string.sign_in_card_body);
-		d.setTextColor(getColor(R.color.text2));
-		d.setTextSize(14);
+		TextView d = Ui.label(this, getString(R.string.sign_in_card_body), 14f, Theme.text2);
 		d.setLineSpacing(dp(4), 1f);
 		d.setPadding(0, dp(8), 0, 0);
 		card.addView(d);
 
-		TextView go = new TextView(this);
-		go.setText(R.string.sign_in);
-		go.setTextColor(getColor(R.color.onAccent));
-		go.setTextSize(16);
-		go.setGravity(Gravity.CENTER);
-		go.setTypeface(null, android.graphics.Typeface.BOLD);
-		go.setBackgroundResource(R.drawable.btn_primary);
-		go.setPadding(dp(16), dp(15), dp(16), dp(15));
-		go.setClickable(true);
+		TextView go = Ui.button(this, getString(R.string.sign_in), true);
 		go.setOnClickListener(v -> doLogin());
 		LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(
-				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(50));
 		glp.topMargin = dp(20);
 		card.addView(go, glp);
 
 		if (!up) {
-			TextView hint = new TextView(this);
-			hint.setText(R.string.sign_in_needs_daemon);
-			hint.setTextColor(getColor(R.color.hint));
-			hint.setTextSize(12);
+			TextView hint = Ui.label(this, getString(R.string.sign_in_needs_daemon), 12f, Theme.hint);
 			hint.setPadding(0, dp(14), 0, 0);
 			card.addView(hint);
 		}
@@ -1235,25 +1418,15 @@ public class MainActivity extends Activity {
 		LinearLayout row = row();
 		final boolean up = p.online;
 
-		ImageView dot = new ImageView(this);
-		dot.setImageResource(R.drawable.dot);
-		dot.setColorFilter(getColor(up ? R.color.ok : R.color.err));
-		dot.setContentDescription(getString(up ? R.string.peer_online : R.string.peer_offline));
-		LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(9), dp(9));
-		dotLp.rightMargin = dp(10);
-		row.addView(dot, dotLp);
+		row.addView(Ui.avatar(this, p.name, up));
 
-		android.widget.Switch cb = toggle(up && chosen.contains(p.name));
+		Ui.Toggle cb = Ui.toggle(this, up && chosen.contains(p.name));
 		cb.setEnabled(up);
 		cb.setAlpha(up ? 1f : 0.4f);
-		cb.setThumbTintList(android.content.res.ColorStateList.valueOf(
-				getColor(up && chosen.contains(p.name) ? R.color.text : R.color.hint)));
 
 		LinearLayout col = col();
-		TextView n = new TextView(this);
-		n.setText(p.name);
-		n.setTextColor(getColor(up ? R.color.text : R.color.hint));
-		n.setTextSize(15);
+		col.setPadding(dp(12), 0, dp(6), 0);
+		TextView n = Ui.label(this, p.name, 15f, (up ? Theme.text : Theme.hint));
 		n.setSingleLine(true);
 		col.addView(n);
 		TextView meta = new TextView(this);
@@ -1274,8 +1447,10 @@ public class MainActivity extends Activity {
 					? "  ·  " + getString(R.string.exit_node_offer) : "")
 				+ (up ? "" : "  ·  " + getString(R.string.peer_offline_label)
 					+ (when.isEmpty() ? "" : "  ·  " + when)));
-		meta.setTextColor(getColor(R.color.text2));
+		meta.setTextColor(Theme.text2);
 		meta.setTextSize(12);
+		meta.setIncludeFontPadding(false);
+		meta.setPadding(0, dp(3), 0, 0);
 		col.addView(meta);
 		row.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -1284,7 +1459,7 @@ public class MainActivity extends Activity {
 		slp.leftMargin = dp(4);
 		row.addView(cb, slp);
 
-		View send = iconButton(R.drawable.ic_send, up ? R.color.text : R.color.hint,
+		View send = iconButton(R.drawable.ic_send, up ? Theme.text : Theme.hint,
 				R.string.send, v -> launchPicker(java.util.Collections.singletonList(p.ip)));
 		send.setEnabled(up);
 		send.setAlpha(up ? 1f : 0.35f);
@@ -1305,25 +1480,25 @@ public class MainActivity extends Activity {
 			// show a tick used to cost a root round-trip and reset the
 			// scroll position for a switch that had already moved.
 			cb.setChecked(now);
-			cb.setThumbTintList(android.content.res.ColorStateList.valueOf(
-					getColor(now ? R.color.text : R.color.hint)));
 			saveTargets();
 			updateSendButton();
 		};
 		row.setOnClickListener(v -> peer.run());
 		row.setClickable(true);
-		cb.setOnClickListener(v -> peer.run());
+		row.setBackground(Ui.press(this));
+		cb.setOnCheckedChangeListener(on -> peer.run());
 		return row;
 	}
 
-	private View iconButton(int drawable, int tint, int label, View.OnClickListener l) {
+	private View iconButton(int drawable, int color, int label, View.OnClickListener l) {
 		ImageView v = new ImageView(this);
 		v.setImageResource(drawable);
-		v.setColorFilter(getColor(tint));
+		v.setColorFilter(color);
 		v.setContentDescription(getString(label));
-		v.setPadding(dp(13), dp(14), dp(13), dp(14));
+		v.setPadding(dp(12), dp(12), dp(12), dp(12));
 		v.setClickable(true);
-		v.setBackgroundResource(R.drawable.row_press);
+		v.setFocusable(true);
+		v.setBackground(Ui.press(this, 999f));
 		v.setOnClickListener(l);
 		return v;
 	}
@@ -1384,7 +1559,10 @@ public class MainActivity extends Activity {
 		}
 		chosen.retainAll(onlinePeers);
 		int n = chosen.size();
-		sendBtn.setEnabled(signedIn(status) && n > 0);
+		boolean on = signedIn(status) && n > 0;
+		sendBtn.setEnabled(on);
+		sendBtn.setTextColor(on ? Theme.onPrimary : Theme.onSurfaceVariant);
+		sendBtn.setBackground(Ui.primaryButton(this, on));
 		if (n == 1) {
 			sendBtn.setText(getString(R.string.send_to, chosen.iterator().next()));
 		} else if (n > 1) {
@@ -1628,9 +1806,12 @@ public class MainActivity extends Activity {
 		boolean online = daemonUp(st);
 
 		LinearLayout c1 = group(pSettings, getString(R.string.connectivity));
-		addToggle(c1, "accept-dns", getString(R.string.t_accept_dns), "", flags, online);
-		addToggle(c1, "accept-routes", getString(R.string.t_accept_routes), "", flags, online);
-		addToggle(c1, "shields-up", getString(R.string.t_shields_up), "", flags, online);
+		addToggle(c1, "accept-dns", getString(R.string.t_accept_dns),
+				getString(R.string.t_accept_dns_sub), flags, online);
+		addToggle(c1, "accept-routes", getString(R.string.t_accept_routes),
+				getString(R.string.t_accept_routes_sub), flags, online);
+		addToggle(c1, "shields-up", getString(R.string.t_shields_up),
+				getString(R.string.t_shields_up_sub), flags, online);
 
 		List<Api.Peer> candidates = new ArrayList<>();
 		for (Api.Peer pp : Api.peersFrom(st)) {
@@ -1646,35 +1827,70 @@ public class MainActivity extends Activity {
 		}
 
 		LinearLayout c2 = group(pSettings, getString(R.string.services));
-		addToggle(c2, "run-ssh", getString(R.string.t_ssh), "", flags, online);
+		addToggle(c2, "run-ssh", getString(R.string.t_ssh),
+				getString(R.string.t_ssh_sub), flags, online);
 
 		LinearLayout c3 = group(pSettings, getString(R.string.this_device));
 		JSONObject prefs = st.optJSONObject("prefs");
 		LinearLayout hr = new LinearLayout(this);
 		hr.setOrientation(LinearLayout.HORIZONTAL);
 		hr.setGravity(Gravity.CENTER_VERTICAL);
+		hr.setPadding(dp(16), dp(6), dp(16), dp(10));
 		EditText in = new EditText(this);
 		in.setHint(getString(R.string.hostname_hint));
 		in.setText(prefs == null ? "" : prefs.optString("hostname", ""));
 		in.setSingleLine(true);
-		in.setTextColor(getColor(R.color.text));
-		in.setHintTextColor(getColor(R.color.hint));
+		in.setTextColor(Theme.text);
+		in.setHintTextColor(Theme.hint);
 		in.setTextSize(15);
-		in.setPadding(dp(12), 0, dp(12), 0);
-		in.setBackgroundResource(R.drawable.field);
-		hr.addView(in, new LinearLayout.LayoutParams(0, dp(46), 1f));
+		in.setPadding(dp(14), 0, dp(14), 0);
+		in.setBackground(Ui.fieldBg(this));
+		hr.addView(in, new LinearLayout.LayoutParams(0, dp(50), 1f));
 
-		TextView apply = new TextView(this);
-		apply.setText(R.string.apply);
-		apply.setTextColor(getColor(online ? R.color.text : R.color.hint));
-		apply.setTextSize(14);
-		apply.setGravity(Gravity.CENTER);
-		apply.setPadding(dp(18), dp(13), dp(6), dp(13));
+		TextView apply = Ui.tonal(this, getString(R.string.apply));
 		apply.setEnabled(online);
+		apply.setAlpha(online ? 1f : 0.4f);
 		apply.setOnClickListener(v -> applyPref("hostname",
 				in.getText().toString().trim(), getString(R.string.hostname)));
-		hr.addView(apply);
+		LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.WRAP_CONTENT, dp(50));
+		alp.leftMargin = dp(10);
+		hr.addView(apply, alp);
 		c3.addView(hr);
+		line(c3);
+		action(c3, getString(R.string.forget_targets),
+				getString(R.string.forget_targets_sub), v -> {
+					chosen.clear();
+					saveTargets();
+					toast(getString(R.string.forget_targets_done));
+					buildSend();
+				});
+
+		// Appearance sits last on purpose: it is the group someone goes
+		// looking for once, not the one they came to this tab for.
+		LinearLayout ap = group(pSettings, getString(R.string.appearance));
+		action(ap, getString(R.string.theme_mode), themeModeLabel(), v -> showThemePicker());
+		Ui.Toggle dyn = addSwitch(ap, getString(R.string.dynamic_color),
+				android.os.Build.VERSION.SDK_INT >= 31
+						? getString(R.string.dynamic_color_sub)
+						: getString(R.string.dynamic_color_unavailable),
+				Theme.dynamic(this), on -> {
+					Theme.setDynamic(this, on);
+					recreate();
+				});
+		boolean canDynamic = android.os.Build.VERSION.SDK_INT >= 31;
+		dyn.setEnabled(canDynamic);
+		dyn.setAlpha(canDynamic ? 1f : 0.4f);
+
+		boolean dark = Theme.darkNow(this);
+		Ui.Toggle black = addSwitch(ap, getString(R.string.amoled),
+				dark ? getString(R.string.amoled_sub) : getString(R.string.amoled_needs_dark),
+				dark && Theme.amoled(this), on -> {
+					Theme.setAmoled(this, on);
+					recreate();
+				});
+		black.setEnabled(dark);
+		black.setAlpha(dark ? 1f : 0.4f);
 
 		if (!online) {
 			note(pSettings, getString(R.string.daemon_stopped_note));
@@ -1682,15 +1898,36 @@ public class MainActivity extends Activity {
 		note(pSettings, getString(R.string.footnote));
 	}
 
+	private String themeModeLabel() {
+		switch (Theme.mode(this)) {
+			case Theme.MODE_LIGHT:
+				return getString(R.string.theme_light);
+			case Theme.MODE_DARK:
+				return getString(R.string.theme_dark);
+			default:
+				return getString(R.string.theme_system);
+		}
+	}
+
+	private void showThemePicker() {
+		int current = Theme.mode(this);
+		Sheet.choice(this, getString(R.string.theme_mode), new CharSequence[] {
+				getString(R.string.theme_system),
+				getString(R.string.theme_light),
+				getString(R.string.theme_dark),
+		}, current, which -> {
+			if (which == Theme.mode(this)) {
+				return;
+			}
+			Theme.setMode(this, which);
+			recreate();
+		});
+	}
+
 	private void addToggle(LinearLayout g, String key, String label, String desc,
 			Map<String, Boolean> flags, boolean online) {
-		android.widget.Switch sw = addSwitch(g, label, desc, flags.getOrDefault(key, false), v -> {
-			// Offline is not a reason to flip the switch back: doing that from
-			// inside its own change listener recursed until the app died. The
-			// switch is disabled instead, so this only fires when a write can
-			// actually reach the daemon.
-			applyPref(key, String.valueOf(v.isChecked()), label);
-		});
+		Ui.Toggle sw = addSwitch(g, label, desc, flags.getOrDefault(key, false),
+				checked -> applyPref(key, String.valueOf(checked), label));
 		sw.setEnabled(online);
 		sw.setAlpha(online ? 1f : 0.4f);
 		switches.put(key, sw);
@@ -1732,12 +1969,14 @@ public class MainActivity extends Activity {
 		updateTitle = null;
 		updateSub = null;
 
+		systemHero(st);
+
 		// The daemon lives with the rest of the system controls. It used to
 		// be repeated on the Send screen as well, which put two Start/Stop
 		// switches in front of the one thing Send is for.
 		LinearLayout d = group(pSystem, getString(R.string.daemon));
 		addSwitch(d, getString(R.string.service), getString(R.string.service_sub),
-				daemonUp(st), v -> service(v.isChecked() ? "start" : "stop"));
+				daemonUp(st), on -> service(on ? "start" : "stop"));
 		action(d, getString(R.string.restart), null, v -> service("restart"));
 		View supRow = action(d, getString(R.string.supervisor),
 				supervisorUp(st) ? getString(R.string.supervisor_running)
@@ -1823,7 +2062,7 @@ public class MainActivity extends Activity {
 		LinearLayout w = group(pSystem, getString(R.string.wireless_adb_group));
 		addSwitch(w, getString(R.string.wireless_adb_switch),
 				getString(R.string.wireless_adb_sub), adbWireless,
-				v -> confirmWirelessAdb(v.isChecked()));
+				on -> confirmWirelessAdb(on));
 		if (adbWireless) {
 			String ip = tsIpv4(st);
 			if (!ip.isEmpty()) {
@@ -1962,11 +2201,11 @@ public class MainActivity extends Activity {
 		scroll.setVerticalScrollBarEnabled(false);
 		final TextView body = new TextView(this);
 		body.setTextSize(11);
-		body.setTextColor(getColor(R.color.text2));
+		body.setTextColor(Theme.text2);
 		body.setTypeface(android.graphics.Typeface.MONOSPACE);
 		body.setLineSpacing(dp(3), 1f);
 		body.setPadding(dp(14), dp(12), dp(14), dp(12));
-		body.setBackgroundResource(R.drawable.field);
+		body.setBackground(Ui.fieldBg(this));
 		scroll.addView(body, new ViewGroup.LayoutParams(
 				ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 		sheet.add(scroll, 380);
@@ -2003,20 +2242,15 @@ public class MainActivity extends Activity {
 	}
 
 	private TextView chip(CharSequence label) {
-		TextView b = new TextView(this);
-		b.setText(label);
-		b.setTextColor(getColor(R.color.accent));
-		b.setTextSize(12.5f);
+		TextView b = Ui.label(this, label, 12.5f, Theme.onSecondaryContainer);
 		b.setTypeface(null, android.graphics.Typeface.BOLD);
-		b.setIncludeFontPadding(false);
 		b.setGravity(Gravity.CENTER);
-		b.setPadding(dp(14), dp(8), dp(14), dp(8));
-		android.graphics.drawable.GradientDrawable g =
-				new android.graphics.drawable.GradientDrawable();
-		g.setCornerRadius(dp(999));
-		g.setColor(getColor(R.color.accentDim));
-		b.setBackground(g);
+		b.setPadding(dp(14), dp(9), dp(14), dp(9));
+		b.setBackground(Ui.ripple(this,
+				Ui.rounded(this, Theme.secondaryContainer, 999f),
+				Theme.withAlpha(Theme.onSecondaryContainer, 0x33), null));
 		b.setClickable(true);
+		b.setFocusable(true);
 		return b;
 	}
 
@@ -2036,7 +2270,7 @@ public class MainActivity extends Activity {
 			if (line.length() > split && isTimestamp(line.substring(0, split))) {
 				sb.append(line, 0, split);
 				sb.setSpan(new android.text.style.ForegroundColorSpan(
-						getColor(R.color.hint)), sb.length() - split, sb.length(),
+						Theme.hint), sb.length() - split, sb.length(),
 						android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
 				sb.append(line, split, line.length());
 			} else {
@@ -2044,7 +2278,7 @@ public class MainActivity extends Activity {
 			}
 			int start = sb.length() - line.length();
 			sb.setSpan(new android.text.style.ForegroundColorSpan(
-					getColor(problem ? R.color.err : R.color.text2)), start, sb.length(),
+					(problem ? Theme.err : Theme.text2)), start, sb.length(),
 					android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
 			sb.append('\n');
 		}
@@ -2237,16 +2471,7 @@ public class MainActivity extends Activity {
 
 	private LinearLayout group(LinearLayout parent, String heading) {
 		if (heading != null) {
-			TextView t = new TextView(this);
-			t.setText(heading);
-			t.setTextColor(getColor(R.color.hint));
-			t.setTextSize(11);
-			t.setTypeface(null, android.graphics.Typeface.BOLD);
-			t.setAllCaps(true);
-			t.setLetterSpacing(0.1f);
-			t.setIncludeFontPadding(false);
-			t.setPadding(dp(4), dp(22), 0, dp(10));
-			parent.addView(t);
+			parent.addView(Ui.section(this, heading));
 		} else {
 			LinearLayout.LayoutParams s = new LinearLayout.LayoutParams(
 					ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -2256,7 +2481,7 @@ public class MainActivity extends Activity {
 
 		LinearLayout g = new LinearLayout(this);
 		g.setOrientation(LinearLayout.VERTICAL);
-		g.setBackgroundResource(R.drawable.group);
+		g.setBackground(Ui.cardBg(this));
 		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
 				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		parent.addView(g, lp);
@@ -2268,7 +2493,7 @@ public class MainActivity extends Activity {
 			return;
 		}
 		View v = new View(this);
-		v.setBackgroundResource(R.drawable.divider);
+		v.setBackgroundColor(Theme.hairline);
 		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
 				ViewGroup.LayoutParams.MATCH_PARENT, 1);
 		lp.leftMargin = dp(16);
@@ -2279,17 +2504,11 @@ public class MainActivity extends Activity {
 	private TextView value(LinearLayout g, String label, String v) {
 		line(g);
 		LinearLayout row = row();
-		TextView l = new TextView(this);
-		l.setText(label);
-		l.setTextColor(getColor(R.color.text));
-		l.setTextSize(15);
+		TextView l = Ui.label(this, label, 15f, Theme.text);
 		l.setSingleLine(true);
 		row.addView(l, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-		TextView val = new TextView(this);
-		val.setText(v);
-		val.setTextColor(getColor(R.color.text2));
-		val.setTextSize(14);
+		TextView val = Ui.label(this, v, 14f, Theme.text2);
 		val.setMaxLines(2);
 		val.setEllipsize(android.text.TextUtils.TruncateAt.END);
 		LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(
@@ -2303,28 +2522,22 @@ public class MainActivity extends Activity {
 	private void copyRow(LinearLayout g, String label, String v) {
 		line(g);
 		LinearLayout row = row();
-		row.setBackgroundResource(R.drawable.row_press);
+		row.setBackground(Ui.press(this));
 		row.setClickable(true);
 		row.setOnClickListener(x -> copy(v));
 
-		TextView l = new TextView(this);
-		l.setText(label);
-		l.setTextColor(getColor(R.color.text));
-		l.setTextSize(15);
+		TextView l = Ui.label(this, label, 15f, Theme.text);
 		l.setSingleLine(true);
 		row.addView(l, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-		TextView val = new TextView(this);
-		val.setText(v);
-		val.setTextColor(getColor(R.color.text2));
-		val.setTextSize(14);
+		TextView val = Ui.label(this, v, 14f, Theme.text2);
 		val.setSingleLine(true);
 		val.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
 		row.addView(val);
 
 		ImageView cp = new ImageView(this);
 		cp.setImageResource(R.drawable.ic_copy);
-		cp.setColorFilter(getColor(R.color.hint));
+		cp.setColorFilter(Theme.hint);
 		LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(15), dp(15));
 		clp.leftMargin = dp(12);
 		row.addView(cp, clp);
@@ -2334,27 +2547,17 @@ public class MainActivity extends Activity {
 	private View action(LinearLayout g, String title, String sub, View.OnClickListener l) {
 		line(g);
 		LinearLayout row = row();
-		row.setBackgroundResource(R.drawable.row_press);
-		row.setClickable(true);
 
 		LinearLayout col = col();
-		TextView t = new TextView(this);
+		TextView t = Ui.label(this, title, 15f, Theme.text);
 		t.setId(R.id.rowTitle);
-		t.setText(title);
-		t.setTextColor(getColor(R.color.text));
-		t.setTextSize(15);
-		t.setIncludeFontPadding(false);
 		t.setSingleLine(true);
 		t.setEllipsize(android.text.TextUtils.TruncateAt.END);
 		col.addView(t);
 
 		if (sub != null && !sub.isEmpty()) {
-			TextView s = new TextView(this);
+			TextView s = Ui.label(this, sub, 12.5f, Theme.text2);
 			s.setId(R.id.rowSub);
-			s.setText(sub);
-			s.setTextColor(getColor(R.color.text2));
-			s.setTextSize(12.5f);
-			s.setIncludeFontPadding(false);
 			s.setPadding(0, dp(3), 0, 0);
 			col.addView(s);
 		}
@@ -2364,53 +2567,42 @@ public class MainActivity extends Activity {
 		if (l != null) {
 			ImageView chev = new ImageView(this);
 			chev.setImageResource(R.drawable.ic_chevron);
-			chev.setColorFilter(getColor(R.color.hint));
+			chev.setColorFilter(Theme.hint);
 			LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(16), dp(16));
 			clp.leftMargin = dp(10);
 			row.addView(chev, clp);
+			row.setBackground(Ui.press(this));
+			row.setClickable(true);
 			row.setOnClickListener(l);
 		}
 		g.addView(row);
 		return row;
 	}
 
-	private android.widget.Switch addSwitch(LinearLayout g, String title, String sub, boolean on,
+	private Ui.Toggle addSwitch(LinearLayout g, String title, String sub, boolean on,
 			OnChecked l) {
 		line(g);
 		LinearLayout row = row();
 		LinearLayout col = col();
 
-		TextView t = new TextView(this);
+		TextView t = Ui.label(this, title, 15f, Theme.text);
 		t.setId(R.id.rowTitle);
-		t.setText(title);
-		t.setTextColor(getColor(R.color.text));
-		t.setTextSize(15);
-		t.setIncludeFontPadding(false);
 		col.addView(t);
 
 		if (sub != null && !sub.isEmpty()) {
-			TextView s = new TextView(this);
+			TextView s = Ui.label(this, sub, 12.5f, Theme.text2);
 			s.setId(R.id.rowSub);
-			s.setText(sub);
-			s.setTextColor(getColor(R.color.text2));
-			s.setTextSize(12.5f);
-			s.setIncludeFontPadding(false);
 			s.setPadding(0, dp(3), 0, 0);
 			col.addView(s);
 		}
 		row.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-		android.widget.Switch sw = toggle(on);
+		Ui.Toggle sw = Ui.toggle(this, on);
 		row.addView(sw);
 
-		sw.setOnCheckedChangeListener((CompoundButton b, boolean checked) -> {
-			((android.widget.Switch) b).setThumbTintList(android.content.res.ColorStateList.valueOf(
-					getColor(checked ? R.color.text : R.color.hint)));
-			if (l != null) {
-				l.on(b);
-			}
-		});
 		if (l != null) {
+			sw.setOnCheckedChangeListener(l::on);
+			row.setBackground(Ui.press(this));
 			row.setClickable(true);
 			// The whole row is a bigger target, but a disabled switch must stay
 			// disabled: performClick() does not check enabled itself.
@@ -2425,10 +2617,7 @@ public class MainActivity extends Activity {
 	}
 
 	private void plain(LinearLayout g, String text) {
-		TextView t = new TextView(this);
-		t.setText(text);
-		t.setTextColor(getColor(R.color.text2));
-		t.setTextSize(14);
+		TextView t = Ui.label(this, text, 14f, Theme.text2);
 		t.setPadding(dp(16), dp(16), dp(16), dp(16));
 		g.addView(t);
 	}
@@ -2437,7 +2626,7 @@ public class MainActivity extends Activity {
 		LinearLayout row = new LinearLayout(this);
 		row.setOrientation(LinearLayout.HORIZONTAL);
 		row.setGravity(Gravity.CENTER_VERTICAL);
-		row.setPadding(dp(16), dp(15), dp(16), dp(15));
+		row.setPadding(dp(16), dp(14), dp(16), dp(14));
 		return row;
 	}
 
@@ -2448,14 +2637,11 @@ public class MainActivity extends Activity {
 	}
 
 	private interface OnChecked {
-		void on(CompoundButton b);
+		void on(boolean checked);
 	}
 
 	private void note(LinearLayout parent, String text) {
-		TextView t = new TextView(this);
-		t.setText(text);
-		t.setTextColor(getColor(R.color.hint));
-		t.setTextSize(12.5f);
+		TextView t = Ui.label(this, text, 12.5f, Theme.hint);
 		t.setLineSpacing(dp(4), 1f);
 		t.setPadding(dp(4), dp(14), dp(4), 0);
 		parent.addView(t);
@@ -2467,22 +2653,5 @@ public class MainActivity extends Activity {
 
 	private int dp(int v) {
 		return (int) (v * getResources().getDisplayMetrics().density);
-	}
-
-	private android.widget.Switch toggle(boolean on) {
-		android.widget.Switch sw = new android.widget.Switch(this);
-		sw.setChecked(on);
-		sw.setShowText(false);
-		sw.setTextOn("");
-		sw.setTextOff("");
-		sw.setThumbTintList(android.content.res.ColorStateList.valueOf(
-				getColor(on ? R.color.text : R.color.thumbOff)));
-		sw.setTrackTintList(new android.content.res.ColorStateList(
-				new int[][] {
-						new int[] { android.R.attr.state_checked },
-						new int[] { },
-				},
-				new int[] { getColor(R.color.accent), getColor(R.color.trackOff) }));
-		return sw;
 	}
 }

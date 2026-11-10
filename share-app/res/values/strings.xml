@@ -173,4 +173,34 @@
 	<string name="wireless_adb_turn_on">Turn on</string>
 	<string name="wireless_adb_on_toast">Wireless debugging is on</string>
 	<string name="wireless_adb_off_toast">Wireless debugging is off</string>
+
+	<!-- ── appearance ──────────────────────────────────────────── -->
+	<string name="appearance">Appearance</string>
+	<string name="theme_mode">Theme</string>
+	<string name="theme_system">Follow system</string>
+	<string name="theme_light">Light</string>
+	<string name="theme_dark">Dark</string>
+	<string name="dynamic_color">Dynamic colour</string>
+	<string name="dynamic_color_sub">Take the palette from your wallpaper</string>
+	<string name="dynamic_color_unavailable">Needs Android 12 or newer</string>
+	<string name="amoled">True black</string>
+	<string name="amoled_sub">Pure black surfaces on OLED screens</string>
+	<string name="amoled_needs_dark">Available in the dark theme</string>
+
+	<!-- ── send ────────────────────────────────────────────────── -->
+	<string name="send_hero_title">Send files</string>
+	<string name="send_hero_body">Pick a device and Taildrop hands the file straight over, peer to peer inside your tailnet. Nothing is uploaded to a server.</string>
+	<string name="send_online">%1$d online</string>
+	<string name="send_selected">%1$d selected</string>
+	<string name="no_peers_body">Bring another device onto this tailnet, or check that it is awake. Only devices that are online can receive a file.</string>
+	<string name="forget_targets">Forget saved send targets</string>
+	<string name="forget_targets_sub">Clear the devices this screen selects for you</string>
+	<string name="forget_targets_done">Saved targets cleared</string>
+
+	<string name="t_accept_dns_sub">Use the tailnet DNS settings on this device</string>
+	<string name="t_accept_routes_sub">Reach subnets advertised by other devices</string>
+	<string name="t_shields_up_sub">Block all incoming connections</string>
+	<string name="t_ssh_sub">Allow Tailscale SSH to this device</string>
+	<string name="daemon_running">Daemon running</string>
+	<string name="daemon_off">Daemon stopped</string>
 </resources>

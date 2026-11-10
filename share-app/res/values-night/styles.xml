@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The launch theme, following the system's night setting.
+
+  This is the theme Android draws the starting window with, before
+  MainActivity exists and before Theme.apply() has resolved Material You.
+  If it stayed dark on a light phone, every cold start would flash black
+  for a frame. Night gets the dark parent, day the light one.
+-->
+<resources>
+	<style name="Theme.Share" parent="Theme.Share.Dark" />
+</resources>

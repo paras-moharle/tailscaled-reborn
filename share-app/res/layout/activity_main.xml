@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	android:id="@+id/root"
 	android:layout_width="match_parent"
 	android:layout_height="match_parent"
 	android:orientation="vertical"
-	android:background="@drawable/bg_app">
+	android:background="@color/bg">
 
 	<!--── header: one title line, nothing more ─────────────────
 	     The top padding here is only a floor. The real status-bar inset is
@@ -161,23 +162,22 @@
 
 	</FrameLayout>
 
-	<!-- ── nav: a floating bar, with the selected tab marked ──
-	     A bar that runs edge to edge on a black page is just a band of
-	     slightly less black. Floating it with a margin and rounding its
-	     ends makes it read as a control sitting on the page, and the
-	     selected tab gets a mark behind its icon so the eye can find it
-	     without reading the labels. -->
+	<!-- ── navigation: the Material 3 bottom bar ────────────────
+	     A bar that runs edge to edge on a black page used to read as just a
+	     slightly lighter band, so it was floated with margins. Material 3
+	     solves the same problem differently: a full-width surface container
+	     separated by a hairline, with a 64x32dp indicator behind the current
+	     item. The indicator is the thing that moves, not the whole bar. -->
 	<LinearLayout
 		android:id="@+id/navBar"
 		android:layout_width="match_parent"
 		android:layout_height="wrap_content"
 		android:orientation="horizontal"
 		android:background="@drawable/nav_bar"
-		android:paddingTop="8dp"
-		android:paddingBottom="8dp"
-		android:layout_marginStart="14dp"
-		android:layout_marginEnd="14dp"
-		android:layout_marginBottom="12dp">
+		android:paddingTop="6dp"
+		android:paddingBottom="10dp"
+		android:paddingStart="8dp"
+		android:paddingEnd="8dp">
 
 		<LinearLayout
 			android:id="@+id/navSend"

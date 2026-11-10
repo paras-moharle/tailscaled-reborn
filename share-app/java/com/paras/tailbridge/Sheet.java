@@ -72,7 +72,7 @@ public final class Sheet {
 		head.setVisibility(View.GONE);
 
 		title = new TextView(a);
-		title.setTextColor(a.getColor(R.color.text));
+		title.setTextColor(Theme.text);
 		title.setTextSize(20);
 		title.setTypeface(null, android.graphics.Typeface.BOLD);
 		title.setLetterSpacing(-0.01f);
@@ -80,7 +80,7 @@ public final class Sheet {
 		head.addView(title);
 
 		subtitle = new TextView(a);
-		subtitle.setTextColor(a.getColor(R.color.text2));
+		subtitle.setTextColor(Theme.text2);
 		subtitle.setTextSize(13.5f);
 		subtitle.setLineSpacing(dp(a, 3), 1f);
 		subtitle.setIncludeFontPadding(false);
@@ -137,11 +137,11 @@ public final class Sheet {
 			// materialises at the bottom edge looks like a glitch, not a
 			// choice.
 			if (bottom) {
-				card.setTranslationY(dp(a, 36));
+				card.setTranslationY(dp(a, 48));
 				card.animate()
 						.translationY(0f)
-						.setDuration(150)
-						.setInterpolator(new DecelerateInterpolator(1.6f))
+						.setDuration(220)
+						.setInterpolator(Ui.EMPHASIZED)
 						.start();
 			}
 		});
@@ -195,7 +195,7 @@ public final class Sheet {
 	public Sheet message(CharSequence text, boolean selectable) {
 		TextView t = new TextView(a);
 		t.setText(text);
-		t.setTextColor(a.getColor(R.color.text2));
+		t.setTextColor(Theme.text2);
 		t.setTextSize(14.5f);
 		t.setLineSpacing(dp(a, 5), 1f);
 		t.setIncludeFontPadding(false);
@@ -260,14 +260,15 @@ public final class Sheet {
 		b.setTypeface(null, kind == SECONDARY
 				? android.graphics.Typeface.NORMAL : android.graphics.Typeface.BOLD);
 		if (kind == PRIMARY) {
-			b.setTextColor(a.getColor(R.color.onAccent));
-			b.setBackground(pill(a.getColor(R.color.accent), 0x33FFFFFF));
+			b.setTextColor(Theme.onPrimary);
+			b.setBackground(pill(Theme.primary, Theme.withAlpha(Theme.onPrimary, 0x40)));
 		} else if (kind == DANGER) {
-			b.setTextColor(Color.WHITE);
-			b.setBackground(pill(a.getColor(R.color.err), 0x33FFFFFF));
+			b.setTextColor(Theme.onError);
+			b.setBackground(pill(Theme.error, Theme.withAlpha(Theme.onError, 0x40)));
 		} else {
-			b.setTextColor(a.getColor(R.color.text));
-			b.setBackground(pill(a.getColor(R.color.surfaceHi), 0x26FFFFFF));
+			b.setTextColor(Theme.onSecondaryContainer);
+			b.setBackground(pill(Theme.secondaryContainer,
+					Theme.withAlpha(Theme.onSecondaryContainer, 0x40)));
 		}
 		b.setClickable(true);
 		b.setFocusable(true);
@@ -370,14 +371,14 @@ public final class Sheet {
 	static GradientDrawable cardBackground(int radius, boolean bottomOnly) {
 		GradientDrawable g = new GradientDrawable(
 				GradientDrawable.Orientation.TOP_BOTTOM,
-				new int[] { 0xFF171D25, 0xFF0F1319 });
+				new int[] { Theme.surfaceContainerHigh, Theme.surfaceContainer });
 		float r = radius;
 		if (bottomOnly) {
 			g.setCornerRadii(new float[] { r, r, r, r, 0, 0, 0, 0 });
 		} else {
 			g.setCornerRadius(r);
 		}
-		g.setStroke(1, 0x1FFFFFFF);
+		g.setStroke(1, Theme.hairline);
 		return g;
 	}
 
@@ -428,7 +429,7 @@ public final class Sheet {
 		for (int i = 0; i < labels.length; i++) {
 			if (i > 0) {
 				View line = new View(a);
-				line.setBackgroundColor(a.getColor(R.color.divider));
+				line.setBackgroundColor(Theme.divider);
 				list.addView(line, new LinearLayout.LayoutParams(
 						ViewGroup.LayoutParams.MATCH_PARENT, 1));
 			}
@@ -436,12 +437,12 @@ public final class Sheet {
 			row.setOrientation(LinearLayout.HORIZONTAL);
 			row.setGravity(Gravity.CENTER_VERTICAL);
 			row.setPadding(dp(a, 6), dp(a, 14), dp(a, 6), dp(a, 14));
-			row.setBackgroundResource(R.drawable.row_press);
+			row.setBackground(Ui.press(a, 12f));
 			row.setClickable(true);
 
 			TextView label = new TextView(a);
 			label.setText(labels[i]);
-			label.setTextColor(a.getColor(i == selected ? R.color.text : R.color.text2));
+			label.setTextColor((i == selected ? Theme.text : Theme.text2));
 			label.setTextSize(15);
 			label.setIncludeFontPadding(false);
 			label.setMaxLines(2);
@@ -451,7 +452,7 @@ public final class Sheet {
 
 			TextView mark = new TextView(a);
 			mark.setText(i == selected ? "✓" : "");
-			mark.setTextColor(a.getColor(R.color.accent));
+			mark.setTextColor(Theme.accent);
 			mark.setTextSize(15);
 			mark.setTypeface(null, android.graphics.Typeface.BOLD);
 			mark.setPadding(dp(a, 12), 0, 0, 0);

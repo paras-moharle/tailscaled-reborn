@@ -61,6 +61,14 @@ fi
 sed -i "s/^version=.*/version=$NEW_VERSION/" module.prop
 sed -i "s/^versionCode=.*/versionCode=$NEW_VERSION_CODE/" module.prop
 
+# The README carries the version twice, in the module badge and in the
+# install filename. Both used to drift several releases behind because no
+# part of the release flow rewrote them.
+if [ -f README.md ]; then
+  sed -i "s|module-v[0-9][0-9.]*-|module-${NEW_VERSION#v}-|" README.md
+  sed -i "s|Tailscaled-Reborn-v[0-9][0-9.]*-full\.zip|Tailscaled-Reborn-${NEW_VERSION}-full.zip|g" README.md
+fi
+
 # One feed file, not three. update-arm.json / update-arm64.json were left over
 # from a multi-architecture layout this module no longer publishes, and the
 # loop silently skipped them when they were absent.

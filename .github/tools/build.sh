@@ -39,10 +39,26 @@ FEED_JSON="$(curl -fsSL "$FEED_URL" 2>/dev/null)" || FEED_JSON=""
 if [ -z "$FEED_JSON" ]; then
 	echo "!! Could not reach the pinned feed (${FEED_URL})" >&2
 	echo "!! Falling back to the GitHub API (rate limited)." >&2
-	FEED_JSON="$(curl -fsSL "https://api.github.com/repos/${TS_BIN_REPO}/releases/latest" 2>/dev/null)" || {
+	# /releases/latest is useless here now that the module zip is the
+	# repository's latest release: that release holds no daemon archive.
+	# List recent releases and pick the first one that actually carries an
+	# arm64 daemon, then reshape it to the same object the feed provides.
+	API_JSON="$(curl -fsSL "https://api.github.com/repos/${TS_BIN_REPO}/releases?per_page=30" 2>/dev/null)" || API_JSON=""
+	if [ -z "$API_JSON" ]; then
 		echo "!! Both feed and API unreachable; cannot embed binaries." >&2
 		exit 1
-	}
+	fi
+	FEED_JSON="$(printf '%s' "$API_JSON" | jq -c --arg repo "$TS_BIN_REPO" '
+		[.[] | select((.assets | length) > 0)
+		     | select(any(.assets[]; .name | endswith("_arm64.tgz")))
+		     | {tag: .tag_name, repo: $repo,
+		        assets: [.assets[] | {name: .name,
+		                               browser_download_url: .browser_download_url}]}]
+		| first // empty' 2>/dev/null)" || FEED_JSON=""
+	if [ -z "$FEED_JSON" ]; then
+		echo "!! No release with an arm64 daemon was found through the API." >&2
+		exit 1
+	fi
 fi
 # The feed names the release the binaries actually live in, and optionally the
 # repo that release belongs to. Guessing is what broke this: the daemon build
@@ -53,8 +69,29 @@ FEED_REPO="$(printf '%s' "$FEED_JSON" | jq -r '.repo // empty' 2>/dev/null)" || 
 [ -n "$FEED_REPO" ] && TS_BIN_REPO="$FEED_REPO"
 echo "    tag: ${FEED_TAG:-<none>}  repo: ${TS_BIN_REPO}"
 
+if [ -z "$FEED_TAG" ]; then
+	echo "!! The feed does not name the release the binaries are in." >&2
+	echo "!! Daemon builds are pre-releases, so /releases/latest cannot be used." >&2
+	exit 1
+fi
+
+# The installer has this repository hardcoded in customize.sh, and it is
+# the installer that a person runs when they flash the module. If the two
+# ever disagree, the installer's download 404s and nobody finds out until a
+# phone tries to install it -- which is exactly what happened when the
+# binaries moved out of the archived second repository.
+INSTALLER_REPO="$(grep -oE '^TS_BIN_REPO="[^"]+"' customize.sh 2>/dev/null | head -1 | cut -d'"' -f2)" || INSTALLER_REPO=""
+if [ -n "$FEED_REPO" ] && [ -n "$INSTALLER_REPO" ] && [ "$FEED_REPO" != "$INSTALLER_REPO" ]; then
+	echo "!! The installer downloads from ${INSTALLER_REPO} but the feed names ${FEED_REPO}." >&2
+	echo "!! Every install of the small zip would fail with a download error." >&2
+	exit 1
+fi
+
 AVAILABLE_ARCH=""
-for ARCH in arm64 arm; do
+# arm64 is the only architecture the module ships. The old loop also asked
+# for `arm`, whose jq build does not exist upstream; the module aborts on
+# arm during install anyway.
+for ARCH in arm64; do
 	# latest.json lists asset names; the GitHub API lists objects with URLs.
 	# Accept either, and never let a jq hiccup abort the build under pipefail.
 	NAME="$(jq -r --arg a "$ARCH" \
@@ -75,29 +112,13 @@ for ARCH in arm64 arm; do
 		 else empty end' <<<"$FEED_JSON" 2>/dev/null | head -1)" || URL=""
 
 	if [ -z "$URL" ]; then
-		# pinned feed gives us the exact release tag: use it so we do not
-		# guess against /releases/latest, which now also publishes module zips.
-		if [ -n "$FEED_TAG" ]; then
-			URL="https://github.com/${TS_BIN_REPO}/releases/download/${FEED_TAG}/${NAME}"
-		else
-			URL="https://github.com/${TS_BIN_REPO}/releases/latest/download/${NAME}"
-		fi
+		# The pinned feed gives us the exact release tag: use it so we do
+		# not guess against /releases/latest, which resolves to the module
+		# zip and holds no daemon archive.
+		URL="https://github.com/${TS_BIN_REPO}/releases/download/${FEED_TAG}/${NAME}"
 	fi
 
-	# The installer has this repository hardcoded in customize.sh, and it is
-# the installer that a person runs when they flash the module. If the two
-# ever disagree, the installer's download 404s and nobody finds out until a
-# phone tries to install it -- which is exactly what happened when the
-# binaries moved out of the archived second repository.
-FEED_REPO_NAME="$(printf '%s' "$FEED_JSON" | jq -r '.repo // empty' 2>/dev/null)" || FEED_REPO_NAME=""
-INSTALLER_REPO="$(grep -oE '^TS_BIN_REPO="[^"]+"' customize.sh 2>/dev/null | head -1 | cut -d'"' -f2)" || INSTALLER_REPO=""
-if [ -n "$FEED_REPO_NAME" ] && [ -n "$INSTALLER_REPO" ] && [ "$FEED_REPO_NAME" != "$INSTALLER_REPO" ]; then
-	echo "!! The installer downloads from ${INSTALLER_REPO} but the feed names ${FEED_REPO_NAME}." >&2
-	echo "!! Every install of the small zip would fail with a download error." >&2
-	exit 1
-fi
-
-echo "- Downloading ${NAME}..."
+	echo "- Downloading ${NAME}..."
 	if ! curl -fsSL "$URL" | tar -xz -C "$BIN_DIR"; then
 		echo "!! failed to fetch ${NAME}" >&2
 		exit 1

@@ -63,7 +63,12 @@ ALIAS="tailbridge"
 # CI passes a key in through TAILBRIDGE_KEYSTORE, which keeps the key out of
 # the repository. A local build without one uses the cached key, so a
 # developer's own builds keep updating each other.
-if [ -n "${TAILBRIDGE_KEYSTORE:-}" ] && [ -f "${TAILBRIDGE_KEYSTORE}" ]; then
+if [ -n "${TAILBRIDGE_KEYSTORE:-}" ]; then
+	[ -f "${TAILBRIDGE_KEYSTORE}" ] || {
+		echo "!! TAILBRIDGE_KEYSTORE is set but ${TAILBRIDGE_KEYSTORE} does not exist" >&2
+		echo "!! refusing to fall back to a throwaway key: the update would not install over the old app" >&2
+		exit 1
+	}
 	KS="${TAILBRIDGE_KEYSTORE}"
 	echo "    using the key from TAILBRIDGE_KEYSTORE"
 fi

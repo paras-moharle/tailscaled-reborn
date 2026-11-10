@@ -68,7 +68,7 @@ final class TransferDialog {
 
 		title = new TextView(a);
 		title.setText(R.string.send_progress_title);
-		title.setTextColor(a.getColor(R.color.text));
+		title.setTextColor(Theme.text);
 		title.setTextSize(17);
 		title.setTypeface(null, android.graphics.Typeface.BOLD);
 		title.setIncludeFontPadding(false);
@@ -81,7 +81,7 @@ final class TransferDialog {
 
 		sub = new TextView(a);
 		sub.setText(firstLine);
-		sub.setTextColor(a.getColor(R.color.text2));
+		sub.setTextColor(Theme.text2);
 		sub.setTextSize(13.5f);
 		sub.setIncludeFontPadding(false);
 		sub.setGravity(Gravity.CENTER);
@@ -141,7 +141,7 @@ final class TransferDialog {
 		if (detail != null && !detail.trim().isEmpty()) {
 			TextView why = new TextView(a);
 			why.setText(detail.trim());
-			why.setTextColor(a.getColor(R.color.hint));
+			why.setTextColor(Theme.hint);
 			why.setTextSize(12);
 			why.setLineSpacing(Sheet.dp(a, 3), 1f);
 			why.setIncludeFontPadding(false);
@@ -172,7 +172,7 @@ final class TransferDialog {
 			super(c);
 			base = c.getResources().getDisplayMetrics().density * 4.2f;
 			gap = c.getResources().getDisplayMetrics().density * 5.5f;
-			paint.setColor(0xFF3D8BFF);
+			paint.setColor(Theme.accent);
 		}
 
 		@Override protected void onDraw(Canvas canvas) {
@@ -223,8 +223,8 @@ final class TransferDialog {
 
 		void setOk(boolean good) {
 			ok = good;
-			ring.setColor(getContext().getColor(good ? R.color.ok : R.color.err));
-			mark.setColor(getContext().getColor(good ? R.color.ok : R.color.err));
+			ring.setColor((good ? Theme.ok : Theme.err));
+			mark.setColor((good ? Theme.ok : Theme.err));
 			invalidate();
 		}
 

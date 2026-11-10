@@ -53,15 +53,15 @@ final class Snack {
 				Sheet.dp(a, 18), Sheet.dp(a, 13));
 
 		GradientDrawable bg = new GradientDrawable();
-		bg.setCornerRadius(Sheet.dp(a, 16));
-		bg.setColor(0xFF171D25);
-		bg.setStroke(1, 0x26FFFFFF);
+		bg.setCornerRadius(Sheet.dp(a, 20));
+		bg.setColor(Theme.surfaceContainerHigh);
+		bg.setStroke(1, Theme.hairline);
 		pill.setBackground(bg);
-		pill.setElevation(Sheet.dp(a, 18));
+		pill.setElevation(Sheet.dp(a, 8));
 
 		TextView dot = new TextView(a);
 		dot.setText("●");
-		dot.setTextColor(a.getColor(R.color.accent));
+		dot.setTextColor(Theme.accent);
 		dot.setTextSize(8);
 		dot.setIncludeFontPadding(false);
 		LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
@@ -71,7 +71,7 @@ final class Snack {
 
 		TextView text = new TextView(a);
 		text.setText(msg);
-		text.setTextColor(a.getColor(R.color.text));
+		text.setTextColor(Theme.text);
 		text.setTextSize(13.5f);
 		text.setIncludeFontPadding(false);
 		text.setMaxLines(3);

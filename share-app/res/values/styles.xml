@@ -1,57 +1,69 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<style name="Theme.Share" parent="@android:style/Theme.Material.NoActionBar">
+	<!--
+	  Two themes, chosen at runtime before the layout is inflated. Material 3
+	  is a light-first design, but this app is a daemon console that is mostly
+	  used at night, so dark is the one the system usually selects and the one
+	  the palette is tuned for.
+
+	  The colours in values/colors.xml are only a first-frame fallback: Theme
+	  replaces every role with a generated Material You palette in onCreate.
+	-->
+	<style name="Theme.Share" parent="Theme.Share.Light" />
+
+	<style name="Theme.Share.Dark" parent="@android:style/Theme.Material.NoActionBar">
 		<item name="android:windowBackground">@color/bg</item>
 		<item name="android:colorAccent">@color/accent</item>
 		<item name="android:colorControlActivated">@color/accent</item>
 		<item name="android:statusBarColor">@android:color/transparent</item>
 		<item name="android:navigationBarColor">@color/bg</item>
 		<item name="android:windowLightStatusBar">false</item>
+		<item name="android:windowLightNavigationBar">false</item>
+		<item name="android:fontFamily">sans</item>
+	</style>
+
+	<style name="Theme.Share.Light" parent="@android:style/Theme.Material.Light.NoActionBar">
+		<item name="android:windowBackground">#FFF7F9FC</item>
+		<item name="android:colorAccent">@color/accent</item>
+		<item name="android:colorControlActivated">@color/accent</item>
+		<item name="android:statusBarColor">@android:color/transparent</item>
+		<item name="android:navigationBarColor">#FFF7F9FC</item>
+		<item name="android:windowLightStatusBar">true</item>
+		<item name="android:windowLightNavigationBar">true</item>
+		<item name="android:fontFamily">sans</item>
 	</style>
 
 	<!-- ── type scale ──────────────────────────────────────────
 
-	     The styles are named Text.Something, so they all inherit from this
-	     one. It carries the two things every piece of text in the app
-	     shares: the colour, and no extra padding above and below the
-	     glyphs, which is what makes a screen look set rather than
-	     typeset.
-	     Three sizes do almost all the work: a row's title, a row's
-	     explanation, and the small label that names a group of rows.
-	     Keeping the set that small is what makes a screen look designed
-	     rather than assembled. -->
+	     Material 3 names five roles; three are enough here: a display line
+	     for the daemon state, a title for a card row, and a body/label pair
+	     for everything else. Keeping the set small is what makes a screen
+	     look designed rather than assembled. -->
 
 	<style name="Text">
 		<item name="android:textColor">@color/text</item>
 		<item name="android:includeFontPadding">false</item>
 	</style>
 
-
-	<!-- The state of the daemon, at the top of every screen. -->
+	<!-- Display small: the daemon state, the first thing on the page. -->
 	<style name="Text.Status">
-		<item name="android:textSize">25sp</item>
+		<item name="android:textSize">26sp</item>
 		<item name="android:textColor">@color/text</item>
-		<item name="android:letterSpacing">-0.015</item>
+		<item name="android:letterSpacing">-0.02</item>
 		<item name="android:textStyle">bold</item>
 	</style>
 
-	<!-- The line under the status: the host and the version. -->
+	<!-- Body small: the host and the version under it. -->
 	<style name="Text.StatusSub">
 		<item name="android:textSize">13sp</item>
 		<item name="android:textColor">@color/text2</item>
+		<item name="android:letterSpacing">0.01</item>
 	</style>
 
-	<!-- A row's title, explanation, and a group note used to live here as
-	     Text.RowTitle / RowSub / Section / Note. The screens now build
-	     those inline, so the styles were dead weight. -->
-
-	<!-- ── bottom nav ───────────────────────────────────────────── -->
-	<!-- The item itself has no background.
-
-	     The default selectableItemBackground is a rectangle the size of the
-	     whole item, so pressing one put a square shadow across the bar. The
-	     touch feedback belongs on the mark behind the icon, which is the
-	     shape of the thing being pressed. -->
+	<!-- ── bottom navigation ───────────────────────────────────── -->
+	<!-- MD3: the item is a column, and the mark behind the icon is a
+	     64x32dp pill. The item itself has no background: the ripple belongs
+	     on the pill, which is the shape being pressed. -->
 	<style name="Nav">
 		<item name="android:layout_width">0dp</item>
 		<item name="android:layout_weight">1</item>
@@ -60,24 +72,25 @@
 		<item name="android:gravity">center</item>
 		<item name="android:clickable">true</item>
 		<item name="android:focusable">true</item>
+		<item name="android:paddingTop">10dp</item>
+		<item name="android:paddingBottom">10dp</item>
 	</style>
 
-	<!-- The mark behind the selected tab's icon. -->
 	<style name="NavPill">
-		<item name="android:layout_width">56dp</item>
-		<item name="android:layout_height">30dp</item>
+		<item name="android:layout_width">64dp</item>
+		<item name="android:layout_height">32dp</item>
 	</style>
 
 	<style name="NavIcon">
-		<item name="android:layout_width">23dp</item>
-		<item name="android:layout_height">23dp</item>
+		<item name="android:layout_width">24dp</item>
+		<item name="android:layout_height">24dp</item>
 	</style>
 
 	<style name="NavLabel">
 		<item name="android:layout_width">wrap_content</item>
 		<item name="android:layout_height">wrap_content</item>
-		<item name="android:layout_marginTop">5dp</item>
-		<item name="android:textSize">10.5sp</item>
+		<item name="android:layout_marginTop">4dp</item>
+		<item name="android:textSize">12sp</item>
 		<item name="android:textColor">@color/hint</item>
 		<item name="android:singleLine">true</item>
 	</style>
