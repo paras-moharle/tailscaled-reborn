@@ -4,7 +4,7 @@ Tailscale on a rooted Android phone: the daemon built from upstream, kept up to
 date on its own, a companion app that only drives the daemon and moves files,
 and a desktop integration for the other direction.
 
-[![module](https://img.shields.io/badge/module-v1.0.37-4ea1ff)](module.prop)
+[![module](https://img.shields.io/badge/module-v1.0.38-4ea1ff)](module.prop)
 [![tailscale](https://img.shields.io/badge/tailscale-1.104.5-3ddc84)](https://tailscale.com)
 [![license](https://img.shields.io/badge/license-BSD--3--Clause-a78bfa)](LICENSE)
 
@@ -38,7 +38,7 @@ control for the daemon or a way to move a file.
 
 ## Install
 
-1. Download **`Tailscaled-Reborn-v1.0.37-full.zip`** from
+1. Download **`Tailscaled-Reborn-v1.0.38-full.zip`** from
    [the releases page](https://github.com/paras-moharle/tailscaled-reborn/releases).
 2. **Magisk / KernelSU → Modules → Install from storage.**
 3. Reboot.
@@ -84,10 +84,12 @@ so ticking a device never waits on root.
 DNS-over-HTTPS URL), search domains, and MagicDNS, each written straight to the
 control plane. Global DNS is control-plane state, so this tab needs a Tailscale
 API access token once: generate one under Settings → Keys in the console and
-paste it in. The token is stored in the app's private data directory, can be
-removed with one tap, and is only used for these calls. Without it the tab
-still shows your tailnet name, whether MagicDNS is on, and this phone's own
-"use tailnet DNS" switch.
+paste it in. The token is stored in the app's private data directory — not the
+module's shared one — can be removed with one tap, and is only used for these
+calls. It carries the same permissions as your Tailscale account, so create it
+with a short expiry and revoke it in the console when you are done. Without it
+the tab still shows your tailnet name, whether MagicDNS is on, and this phone's
+own "use tailnet DNS" switch.
 
 **Settings** — the daemon's own preferences: accept DNS, accept routes, shields
 up, Tailscale SSH, the web client, advertised subnet routes and source NAT for

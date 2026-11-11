@@ -1,3 +1,14 @@
+## v1.0.38  2026-11-11
+
+- **The DNS token warning says what the token really is.** v1.0.37 called it a
+  key that "can edit DNS", which is not how Tailscale access tokens work: a
+  `tskey-api-` token carries the same permissions as the account that created
+  it. The setup card now says so, recommends a short expiry, and points at
+  revoking it in the console; the connected card repeats it. The README matches.
+  Storage did not change — app-private preferences, never the module's shared
+  directory, never written to the daemon log — but the promise around it now
+  matches the thing being stored.
+
 ## v1.0.37  2026-11-11
 
 - **A DNS tab, with the admin console's DNS page inside it.** Global

@@ -2807,6 +2807,12 @@ public class MainActivity extends Activity {
 		g.addView(dnsStep(2, getString(R.string.dns_step_2)));
 		g.addView(dnsStep(3, getString(R.string.dns_step_3)));
 
+		TextView warn = Ui.label(this, getString(R.string.dns_token_note), 12f,
+				Theme.hint);
+		warn.setLineSpacing(dp(4), 1f);
+		warn.setPadding(dp(18), dp(6), dp(18), dp(4));
+		g.addView(warn);
+
 		LinearLayout entry = new LinearLayout(this);
 		entry.setOrientation(LinearLayout.HORIZONTAL);
 		entry.setGravity(Gravity.CENTER_VERTICAL);

@@ -237,10 +237,11 @@
 	<string name="dns_ns_none">No global nameservers</string>
 
 	<string name="dns_connect_title">Connect your tailnet</string>
-	<string name="dns_connect_body">MagicDNS, global nameservers and search domains live in Tailscale\u2019s control plane, not on this phone \u2014 which is why the daemon cannot change them. One API token unlocks them here.</string>
+	<string name="dns_connect_body">MagicDNS, global nameservers and search domains live in Tailscale\u2019s control plane, not on this phone \u2014 which is why the daemon cannot change them. An API access token unlocks them here.</string>
 	<string name="dns_step_1">Sign in to the admin console.</string>
 	<string name="dns_step_2">Settings  \u2192  Keys  \u2192  Generate access token.</string>
-	<string name="dns_step_3">Paste it below. It never leaves this phone.</string>
+	<string name="dns_step_3">Paste it below. It is kept in this app\u2019s private storage and never leaves this phone.</string>
+	<string name="dns_token_note">A Tailscale access token carries the same permissions as your account, not just DNS. Give it a short expiry and revoke it in the console when you are done \u2014 nothing here needs it permanently.</string>
 	<string name="dns_create_token">Open token settings</string>
 	<string name="dns_token_label">API access token</string>
 	<string name="dns_token_hint">tskey-api-\u2026</string>
@@ -249,7 +250,7 @@
 	<string name="dns_token_bad">Couldn\u2019t connect: %1$s</string>
 	<string name="dns_token_empty">Paste a token first</string>
 	<string name="dns_connected_as">Connected to %1$s</string>
-	<string name="dns_connected_named">Your token can edit DNS for this tailnet.</string>
+	<string name="dns_connected_named">Uses your Tailscale account\u2019s permissions. Revoke it any time in the console.</string>
 	<string name="dns_disconnect">Disconnect tailnet</string>
 	<string name="dns_disconnect_sub">Forget the API token on this phone. DNS settings stay as they are.</string>
 	<string name="dns_disconnect_done">Tailnet disconnected</string>
