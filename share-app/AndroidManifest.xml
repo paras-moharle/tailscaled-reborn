@@ -18,6 +18,15 @@
 	<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
 	<!--
+  The DNS screen talks to api.tailscale.com with an access token the user
+  supplies, because tailnet-wide DNS is control-plane state the daemon cannot
+  change. Everything else in the app still goes through root and the module's
+  API; this is the one outbound connection, and it is only made when a token
+  is stored.
+-->
+<uses-permission android:name="android.permission.INTERNET" />
+
+	<!--
   Package visibility (API 30+). Without this, getLaunchIntentForPackage() returns
   null for every root manager and the "grant root permission" gate silently
   falls through to Android app settings, which is not where superuser

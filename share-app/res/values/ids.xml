@@ -2,4 +2,5 @@
 <resources>
 	<item name="rowTitle" type="id" />
 	<item name="rowSub" type="id" />
+	<item name="statValue" type="id" />
 </resources>

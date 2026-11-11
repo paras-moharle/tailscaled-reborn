@@ -4,7 +4,7 @@ Tailscale on a rooted Android phone: the daemon built from upstream, kept up to
 date on its own, a companion app that only drives the daemon and moves files,
 and a desktop integration for the other direction.
 
-[![module](https://img.shields.io/badge/module-v1.0.36-4ea1ff)](module.prop)
+[![module](https://img.shields.io/badge/module-v1.0.37-4ea1ff)](module.prop)
 [![tailscale](https://img.shields.io/badge/tailscale-1.104.5-3ddc84)](https://tailscale.com)
 [![license](https://img.shields.io/badge/license-BSD--3--Clause-a78bfa)](LICENSE)
 
@@ -20,9 +20,11 @@ and a desktop integration for the other direction.
   description shows the result directly:
   `[ ✔ tailscaled running · Taildrop ready ]`, `[ ✔ tailscaled running ·
   receiver down ]`, or `[ ✘ tailscaled stopped ]`.
-- **TailBridge**, a small app with no internet permission of its own. It talks
-  to the daemon over `su` and does three things: shows your devices, sends
-  files, and controls the daemon.
+- **TailBridge**, a small app with no dependencies. It talks to the daemon
+  over `su` and does four things: shows your devices, sends files, edits the
+  tailnet's DNS, and controls the daemon. Its one outbound connection is the
+  optional DNS screen, which talks to Tailscale's API with a token you paste
+  in; nothing else in the app uses the network.
 - **Taildrop**, so files move both ways: from the phone through the app or any
   app's share sheet, and from a desktop through a Nautilus menu entry or the
   supplied receiver.
@@ -36,7 +38,7 @@ control for the daemon or a way to move a file.
 
 ## Install
 
-1. Download **`Tailscaled-Reborn-v1.0.36-full.zip`** from
+1. Download **`Tailscaled-Reborn-v1.0.37-full.zip`** from
    [the releases page](https://github.com/paras-moharle/tailscaled-reborn/releases).
 2. **Magisk / KernelSU → Modules → Install from storage.**
 3. Reboot.
@@ -66,7 +68,10 @@ login and you will have to sign in again.
 
 ## The app
 
-Three tabs, each one job.
+Four tabs, each one job. The interface is Material 3 drawn by the app itself —
+wallpaper colour on Android 12 and newer, light or dark following the system,
+an optional true-black mode, and Outfit for display type. There is no Material
+library and no AndroidX: the build is `javac` and `d8`.
 
 **Send** — your devices, and the files you have picked. Tick one or more
 devices, pick files, send. A transfer shows one popup with a live count and
@@ -74,9 +79,19 @@ cannot be dismissed halfway through; when it finishes, the popup says how many
 files reached how many devices. Picking a device updates the selection locally,
 so ticking a device never waits on root.
 
+**DNS** — the tailnet's own DNS, without the admin console. Global nameservers
+(one tap for Cloudflare, Google, Quad9, AdGuard and NextDNS, or any address or
+DNS-over-HTTPS URL), search domains, and MagicDNS, each written straight to the
+control plane. Global DNS is control-plane state, so this tab needs a Tailscale
+API access token once: generate one under Settings → Keys in the console and
+paste it in. The token is stored in the app's private data directory, can be
+removed with one tap, and is only used for these calls. Without it the tab
+still shows your tailnet name, whether MagicDNS is on, and this phone's own
+"use tailnet DNS" switch.
+
 **Settings** — the daemon's own preferences: accept DNS, accept routes, shields
-up, exit node, Tailscale SSH, and this device's name. Every switch writes
-straight to the daemon.
+up, Tailscale SSH, the web client, advertised subnet routes and source NAT for
+them, and this device's name. Every switch writes straight to the daemon.
 
 **System** — start / stop / restart the daemon, the supervisor's state, this
 device's addresses and relay, sign in and out, the tailscaled and module
@@ -288,6 +303,9 @@ truth.
   the module this was forked from.
 - **Magisk / libsu** (topjohnwu), **KernelSU** (tiann),
   **[jq](https://github.com/jqlang/jq)**.
+- **[Outfit](https://github.com/Outfitio/Outfit-Fonts)** — the display
+  typeface, SIL Open Font License 1.1, licence in
+  [share-app/OFL-Outfit.txt](share-app/OFL-Outfit.txt).
 
 Not affiliated with Tailscale Inc.
 

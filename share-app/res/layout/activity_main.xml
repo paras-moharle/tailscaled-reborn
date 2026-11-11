@@ -25,23 +25,24 @@
 		<!-- The status light.
 
 		     A bare dot on a black page is very small and very easy to miss.
-		     A disc of the same colour at a low alpha behind it reads as a
-		     light rather than a speck. -->
+		     A tinted tile behind it reads as a light rather than a speck,
+		     and gives the header a coloured anchor at the same time. -->
 		<FrameLayout
-			android:layout_width="24dp"
-			android:layout_height="24dp"
-			android:layout_marginEnd="12dp">
+			android:id="@+id/dotTile"
+			android:layout_width="42dp"
+			android:layout_height="42dp"
+			android:layout_marginEnd="14dp">
 
 			<View
 				android:id="@+id/dotHalo"
-				android:layout_width="24dp"
-				android:layout_height="24dp"
+				android:layout_width="match_parent"
+				android:layout_height="match_parent"
 				android:background="@drawable/dot_halo" />
 
 			<View
 				android:id="@+id/dot"
-				android:layout_width="9dp"
-				android:layout_height="9dp"
+				android:layout_width="10dp"
+				android:layout_height="10dp"
 				android:layout_gravity="center"
 				android:background="@drawable/dot" />
 		</FrameLayout>
@@ -53,10 +54,18 @@
 			android:orientation="vertical">
 
 			<TextView
+				android:id="@+id/eyebrow"
+				style="@style/Text.Eyebrow"
+				android:layout_width="wrap_content"
+				android:layout_height="wrap_content"
+				android:text="@string/app_name" />
+
+			<TextView
 				android:id="@+id/status"
 				style="@style/Text.Status"
 				android:layout_width="wrap_content"
 				android:layout_height="wrap_content"
+				android:layout_marginTop="1dp"
 				android:singleLine="true"
 				android:ellipsize="end"
 				android:text="@string/loading" />
@@ -76,9 +85,10 @@
 		     that waiting for it feels like the app is stuck. -->
 		<ImageView
 			android:id="@+id/refresh"
-			android:layout_width="42dp"
-			android:layout_height="42dp"
-			android:padding="11dp"
+			android:layout_width="46dp"
+			android:layout_height="46dp"
+			android:padding="12dp"
+			android:layout_marginStart="8dp"
 			android:layout_gravity="center_vertical"
 			android:src="@drawable/ic_refresh"
 			android:background="?android:attr/selectableItemBackgroundBorderless"
@@ -123,6 +133,24 @@
 				android:paddingBottom="96dp" />
 		</ScrollView>
 
+
+		<ScrollView
+			android:id="@+id/scrollDns"
+			android:layout_width="match_parent"
+			android:layout_height="match_parent"
+			android:clipToPadding="false"
+			android:scrollbars="none"
+			android:visibility="gone">
+
+			<LinearLayout
+				android:id="@+id/pDns"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:orientation="vertical"
+				android:paddingStart="16dp"
+				android:paddingEnd="16dp"
+				android:paddingBottom="96dp" />
+		</ScrollView>
 
 		<ScrollView
 			android:id="@+id/scrollSettings"
@@ -172,10 +200,14 @@
 		android:id="@+id/navBar"
 		android:layout_width="match_parent"
 		android:layout_height="wrap_content"
+		android:layout_marginStart="14dp"
+		android:layout_marginEnd="14dp"
+		android:layout_marginBottom="10dp"
 		android:orientation="horizontal"
 		android:background="@drawable/nav_bar"
-		android:paddingTop="6dp"
-		android:paddingBottom="10dp"
+		android:elevation="3dp"
+		android:paddingTop="7dp"
+		android:paddingBottom="7dp"
 		android:paddingStart="8dp"
 		android:paddingEnd="8dp">
 
@@ -207,6 +239,37 @@
 				android:id="@+id/navLabel"
 				style="@style/NavLabel"
 				android:text="@string/nav_send" />
+		</LinearLayout>
+
+
+		<LinearLayout
+			android:id="@+id/navDns"
+			style="@style/Nav">
+
+			<FrameLayout
+				style="@style/NavPill"
+				android:background="@drawable/nav_pill_ripple"
+				android:clickable="false"
+				android:focusable="false">
+
+				<View
+					android:id="@+id/navPill"
+					android:layout_width="match_parent"
+					android:layout_height="match_parent"
+					android:background="@drawable/nav_pill"
+					android:visibility="invisible" />
+
+				<ImageView
+					android:id="@+id/navIcon"
+					style="@style/NavIcon"
+					android:layout_gravity="center"
+					android:src="@drawable/ic_globe" />
+			</FrameLayout>
+
+			<TextView
+				android:id="@+id/navLabel"
+				style="@style/NavLabel"
+				android:text="@string/nav_dns" />
 		</LinearLayout>
 
 

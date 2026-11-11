@@ -19,7 +19,7 @@
 		<item name="android:navigationBarColor">@color/bg</item>
 		<item name="android:windowLightStatusBar">false</item>
 		<item name="android:windowLightNavigationBar">false</item>
-		<item name="android:fontFamily">sans</item>
+		<item name="android:fontFamily">@font/outfit</item>
 	</style>
 
 	<style name="Theme.Share.Light" parent="@android:style/Theme.Material.Light.NoActionBar">
@@ -30,7 +30,7 @@
 		<item name="android:navigationBarColor">#FFF7F9FC</item>
 		<item name="android:windowLightStatusBar">true</item>
 		<item name="android:windowLightNavigationBar">true</item>
-		<item name="android:fontFamily">sans</item>
+		<item name="android:fontFamily">@font/outfit</item>
 	</style>
 
 	<!-- ── type scale ──────────────────────────────────────────
@@ -49,13 +49,22 @@
 	<style name="Text.Status">
 		<item name="android:textSize">26sp</item>
 		<item name="android:textColor">@color/text</item>
-		<item name="android:letterSpacing">-0.02</item>
+		<item name="android:letterSpacing">-0.03</item>
 		<item name="android:textStyle">bold</item>
+	</style>
+
+	<!-- The category above the display line: small, tracked, coloured. -->
+	<style name="Text.Eyebrow">
+		<item name="android:textSize">10.5sp</item>
+		<item name="android:textColor">@color/accent</item>
+		<item name="android:letterSpacing">0.16</item>
+		<item name="android:textStyle">bold</item>
+		<item name="android:textAllCaps">true</item>
 	</style>
 
 	<!-- Body small: the host and the version under it. -->
 	<style name="Text.StatusSub">
-		<item name="android:textSize">13sp</item>
+		<item name="android:textSize">12.5sp</item>
 		<item name="android:textColor">@color/text2</item>
 		<item name="android:letterSpacing">0.01</item>
 	</style>

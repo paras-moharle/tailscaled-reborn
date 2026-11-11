@@ -20,6 +20,8 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -78,18 +80,22 @@ public class MainActivity extends Activity {
 	private final List<String> nameShown = new ArrayList<>();
 
 	private TextView statusView;
+	private TextView eyebrowView;
 	private TextView versionView;
 	private View dotView;
 	/** The soft disc behind the status dot. */
 	private View dotHaloView;
 
 	private LinearLayout pSend;
+	private LinearLayout pDns;
 	private LinearLayout pSettings;
 	private LinearLayout pSystem;
-	private final View[] navs = new View[3];
+	private final View[] navs = new View[4];
 	private int currentTab = 0;
 
 	private TextView sendBtn;
+	/** the selected count inside the Send hero, patched without a rebuild. */
+	private TextView heroSelected;
 	/** row that offers the software update once a newer build is known. */
 	private View updateRow;
 	private TextView updateTitle;
@@ -103,7 +109,7 @@ public class MainActivity extends Activity {
 	/** Something asked for a refresh while one was running. */
 	private boolean refreshAgain;
 	/** Which tab bodies are stale. Only the visible one is rebuilt. */
-	private final boolean[] dirty = { true, true, true };
+	private final boolean[] dirty = { true, true, true, true };
 	private volatile String latestVersion = "";
 	/** Whether adbd is listening for TCP connections. */
 	private volatile boolean adbWireless;
@@ -129,17 +135,20 @@ public class MainActivity extends Activity {
 		setContentView(R.layout.activity_main);
 
 		statusView = findViewById(R.id.status);
+		eyebrowView = findViewById(R.id.eyebrow);
 		versionView = findViewById(R.id.version);
 		dotView = findViewById(R.id.dot);
 		dotHaloView = findViewById(R.id.dotHalo);
 		pSend = findViewById(R.id.pSend);
+		pDns = findViewById(R.id.pDns);
 		pSettings = findViewById(R.id.pSettings);
 		pSystem = findViewById(R.id.pSystem);
 		styleChrome();
 
 		navs[0] = findViewById(R.id.navSend);
-		navs[1] = findViewById(R.id.navSettings);
-		navs[2] = findViewById(R.id.navSystem);
+		navs[1] = findViewById(R.id.navDns);
+		navs[2] = findViewById(R.id.navSettings);
+		navs[3] = findViewById(R.id.navSystem);
 		for (int i = 0; i < navs.length; i++) {
 			final int n = i;
 			navs[i].setOnClickListener(v -> tab(n));
@@ -158,6 +167,7 @@ public class MainActivity extends Activity {
 			}
 		};
 		attachPullToRefresh(findViewById(R.id.scrollSend), pullRefresh);
+		attachPullToRefresh(findViewById(R.id.scrollDns), pullRefresh);
 		attachPullToRefresh(findViewById(R.id.scrollSettings), pullRefresh);
 		attachPullToRefresh(findViewById(R.id.scrollSystem), pullRefresh);
 
@@ -375,6 +385,7 @@ public class MainActivity extends Activity {
 		currentTab = n;
 		ScrollView[] scrolls = {
 				findViewById(R.id.scrollSend),
+				findViewById(R.id.scrollDns),
 				findViewById(R.id.scrollSettings),
 				findViewById(R.id.scrollSystem),
 		};
@@ -405,9 +416,9 @@ public class MainActivity extends Activity {
 			// on a dark page reads as a flicker rather than a move.
 			ScrollView now = scrolls[n];
 			now.setAlpha(0f);
-			now.setTranslationY(dp(10));
+			now.setTranslationY(dp(14));
 			now.animate().alpha(1f).translationY(0f)
-					.setDuration(220).setInterpolator(Ui.EMPHASIZED).start();
+					.setDuration(260).setInterpolator(Ui.EMPHASIZED).start();
 		}
 		buildVisible();
 	}
@@ -452,8 +463,12 @@ public class MainActivity extends Activity {
 		if (refresh instanceof ImageView) {
 			((ImageView) refresh).setColorFilter(Theme.text2);
 			refresh.setBackground(Ui.ripple(this,
-					new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT),
+					Ui.rounded(this, Theme.surfaceContainerHigh, 999f),
 					Theme.withAlpha(Theme.onSurface, 0x1F), null));
+			Ui.pressable(refresh);
+		}
+		if (eyebrowView != null) {
+			eyebrowView.setTextColor(Theme.accent);
 		}
 		View pull = findViewById(R.id.pullSpinner);
 		if (pull instanceof ImageView) {
@@ -463,6 +478,8 @@ public class MainActivity extends Activity {
 		View navBar = findViewById(R.id.navBar);
 		if (navBar != null) {
 			navBar.setBackground(Ui.navBg(this));
+			navBar.setClipToOutline(true);
+			navBar.setElevation(dp(3));
 		}
 		int[] navIds = {R.id.navSend, R.id.navSettings, R.id.navSystem};
 		for (int id : navIds) {
@@ -618,25 +635,44 @@ public class MainActivity extends Activity {
 
 	private void applyWindowInsets() {
 		final View header = findViewById(R.id.header);
+		final View navBar = findViewById(R.id.navBar);
 		final int floor = dp(22);
 		header.setOnApplyWindowInsetsListener((v, insets) -> {
 			int top = 0;
+			int bottom = 0;
 			if (android.os.Build.VERSION.SDK_INT >= 30) {
 				android.graphics.Insets bars = insets.getInsets(
 						android.view.WindowInsets.Type.systemBars()
 								| android.view.WindowInsets.Type.displayCutout());
 				top = bars.top;
+				bottom = bars.bottom;
 			} else {
 				top = insets.getSystemWindowInsetTop();
+				bottom = insets.getSystemWindowInsetBottom();
 			}
 			v.setPadding(v.getPaddingLeft(), floor + top, v.getPaddingRight(),
 					v.getPaddingBottom());
+			if (navBar != null && navBar.getLayoutParams()
+					instanceof ViewGroup.MarginLayoutParams) {
+				ViewGroup.MarginLayoutParams lp =
+						(ViewGroup.MarginLayoutParams) navBar.getLayoutParams();
+				int want = dp(10) + (bottom > dp(24) ? bottom : 0);
+				if (lp.bottomMargin != want) {
+					lp.bottomMargin = want;
+					navBar.requestLayout();
+				}
+			}
 			return insets;
 		});
 		header.requestApplyInsets();
 	}
 
 	private void manualRefresh() {
+		// A manual refresh means "read everything again", including the DNS
+		// document the page otherwise caches for a minute.
+		if (CloudApi.connected(this)) {
+			dnsData = null;
+		}
 		View btn = findViewById(R.id.refresh);
 		btn.setEnabled(false);
 		btn.animate().rotationBy(360f).setDuration(520).setListener(
@@ -673,7 +709,7 @@ public class MainActivity extends Activity {
 		}
 		chosen.retainAll(onlinePeers);
 
-		dirty[0] = dirty[1] = dirty[2] = true;
+		dirty[0] = dirty[1] = dirty[2] = dirty[3] = true;
 		buildVisible();
 	}
 
@@ -705,14 +741,20 @@ public class MainActivity extends Activity {
 				break;
 			case 1:
 				if (dirty[1]) {
-					buildSettings(status);
+					buildDns(status);
 					dirty[1] = false;
 				}
 				break;
 			case 2:
 				if (dirty[2]) {
-					buildSystem(status);
+					buildSettings(status);
 					dirty[2] = false;
+				}
+				break;
+			case 3:
+				if (dirty[3]) {
+					buildSystem(status);
+					dirty[3] = false;
 				}
 				break;
 			default:
@@ -786,6 +828,9 @@ public class MainActivity extends Activity {
 	private long lastUpdateCheck;
 
 	private void applyHeader(JSONObject st) {
+		statusView.setTextSize(26f);
+		statusView.setSingleLine(true);
+		statusView.setMaxLines(1);
 		String backend = st.optString("backend", "?");
 		JSONObject self = st.optJSONObject("self");
 		String host = self == null ? "" : self.optString("host", "");
@@ -832,8 +877,8 @@ public class MainActivity extends Activity {
 			dotView.getBackground().mutate().setTint(c);
 		}
 		if (dotHaloView != null) {
-			dotHaloView.getBackground().mutate().setTint(c);
-			dotHaloView.setAlpha(38);
+			dotHaloView.setBackground(Ui.rounded(this, Theme.withAlpha(c, 0x26), 14f));
+			dotHaloView.setAlpha(1f);
 		}
 	}
 
@@ -877,7 +922,7 @@ public class MainActivity extends Activity {
 							lastBodySignature = sig;
 							status = fSt;
 							indexPeers(fSt);
-							dirty[0] = dirty[1] = dirty[2] = true;
+							dirty[0] = dirty[1] = dirty[2] = dirty[3] = true;
 							buildVisible();
 						}
 					}
@@ -952,6 +997,9 @@ public class MainActivity extends Activity {
 
 		statusView.setText(getString(slow ? R.string.daemon_slow_short
 				: noRoot ? R.string.need_root_short : R.string.module_broken_short));
+		statusView.setTextSize(24f);
+		statusView.setSingleLine(false);
+		statusView.setMaxLines(2);
 		versionView.setText(slow ? getString(R.string.daemon_slow_hint)
 				: noRoot ? getString(R.string.grant_root)
 				: getString(R.string.module_broken_hint));
@@ -1095,7 +1143,9 @@ public class MainActivity extends Activity {
 			pendingCard();
 		}
 
-		LinearLayout t = group(pSend, getString(R.string.choose_devices));
+		LinearLayout t = group(pSend, getString(R.string.choose_devices),
+				peerList.isEmpty() ? null
+						: getString(R.string.send_online, onlinePeers.size()));
 		if (peerList.isEmpty()) {
 			emptyPeers(t);
 		} else {
@@ -1111,10 +1161,17 @@ public class MainActivity extends Activity {
 		// A filled, full-width action. The selector is the signal that the
 		// page has a primary job, so it gets a button and not a row.
 		sendBtn = Ui.button(this, getString(R.string.send_files), false);
+		sendBtn.setCompoundDrawablePadding(dp(10));
+		android.graphics.drawable.Drawable arrow =
+				getResources().getDrawable(R.drawable.ic_send, getTheme()).mutate();
+		arrow.setBounds(0, 0, dp(19), dp(19));
+		arrow.setTint(Theme.onSurfaceVariant);
+		sendBtn.setCompoundDrawables(arrow, null, null, null);
 		sendBtn.setOnClickListener(v -> onSendPressed());
+		Ui.pressable(sendBtn);
 		LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
-				ViewGroup.LayoutParams.MATCH_PARENT, dp(56));
-		slp.topMargin = dp(18);
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(58));
+		slp.topMargin = dp(20);
 		pSend.addView(sendBtn, slp);
 
 		updateSendButton();
@@ -1122,71 +1179,100 @@ public class MainActivity extends Activity {
 
 	/** The page's opening panel: what this screen is for, in one breath. */
 	private void sendHero() {
+		heroSelected = null;
 		LinearLayout hero = Ui.heroCard(this);
-		hero.setPadding(dp(22), dp(22), dp(22), dp(20));
-		pSend.addView(hero, new LinearLayout.LayoutParams(
-				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+		hero.setPadding(dp(24), dp(24), dp(24), dp(22));
+		LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		hlp.topMargin = dp(4);
+		pSend.addView(hero, hlp);
 
-		ImageView mark = new ImageView(this);
-		mark.setImageResource(R.drawable.ic_send);
-		mark.setColorFilter(Theme.accent);
-		mark.setContentDescription(getString(R.string.send_files));
-		mark.setPadding(dp(11), dp(11), dp(11), dp(11));
-		mark.setBackground(Ui.rounded(this, Theme.accentDim, 16f));
-		LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(dp(46), dp(46));
-		mlp.bottomMargin = dp(16);
-		hero.addView(mark, mlp);
+		LinearLayout top = new LinearLayout(this);
+		top.setOrientation(LinearLayout.HORIZONTAL);
+		top.setGravity(Gravity.CENTER_VERTICAL);
+		hero.addView(top);
 
-		TextView title = Ui.label(this, getString(R.string.send_hero_title), 23f, Theme.text);
+		FrameLayout mark = Ui.iconTile(this, R.drawable.ic_send,
+				Theme.accentDim, Theme.accent, 52);
+		LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(dp(52), dp(52));
+		mlp.rightMargin = dp(14);
+		mlp.bottomMargin = dp(2);
+		top.addView(mark, mlp);
+
+		LinearLayout titles = col();
+		titles.addView(Ui.eyebrow(this, getString(R.string.page_send)));
+		TextView title = Ui.label(this, getString(R.string.send_hero_title), 29f, Theme.text);
 		title.setTypeface(null, android.graphics.Typeface.BOLD);
-		title.setLetterSpacing(-0.02f);
-		hero.addView(title);
+		title.setLetterSpacing(-0.035f);
+		title.setPadding(0, dp(2), 0, 0);
+		titles.addView(title);
+		top.addView(titles, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
 		TextView body = Ui.label(this, getString(R.string.send_hero_body), 13.5f, Theme.text2);
-		body.setLineSpacing(dp(4), 1f);
-		body.setPadding(0, dp(8), 0, 0);
+		body.setLineSpacing(dp(5), 1f);
+		body.setPadding(0, dp(14), 0, 0);
 		hero.addView(body);
 
 		LinearLayout stats = new LinearLayout(this);
 		stats.setOrientation(LinearLayout.HORIZONTAL);
 		stats.setGravity(Gravity.CENTER_VERTICAL);
-		stats.setPadding(0, dp(16), 0, 0);
+		stats.setPadding(0, dp(20), 0, 0);
+
 		boolean anyOnline = !onlinePeers.isEmpty();
-		TextView online = statPill(getString(R.string.send_online, onlinePeers.size()),
-				anyOnline);
-		stats.addView(online);
-		if (!chosen.isEmpty()) {
-			TextView picked = statPill(getString(R.string.send_selected, chosen.size()), true);
-			LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(
-					ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-			plp.leftMargin = dp(8);
-			stats.addView(picked, plp);
-		}
+		stats.addView(statTile(String.valueOf(onlinePeers.size()),
+				getString(R.string.stat_online), anyOnline), statParams());
+
+		heroSelected = statTile(String.valueOf(chosen.size()),
+				getString(R.string.stat_selected), !chosen.isEmpty())
+				.findViewById(R.id.statValue);
+		LinearLayout.LayoutParams slp = statParams();
+		slp.leftMargin = dp(10);
+		stats.addView((View) heroSelected.getParent(), slp);
 		hero.addView(stats);
+
+		Ui.stagger(top, body, stats);
 	}
 
-	private TextView statPill(CharSequence label, boolean lit) {
-		return toneChip(label,
-				lit ? Theme.secondaryContainer : Theme.surfaceContainerHighest,
+	private LinearLayout.LayoutParams statParams() {
+		return new LinearLayout.LayoutParams(0, dp(70), 1f);
+	}
+
+	/** A small inset block with the number first and its name underneath. */
+	private LinearLayout statTile(String value, String label, boolean lit) {
+		LinearLayout tile = new LinearLayout(this);
+		tile.setOrientation(LinearLayout.VERTICAL);
+		tile.setGravity(Gravity.CENTER_VERTICAL);
+		tile.setPadding(dp(16), dp(12), dp(14), dp(12));
+		tile.setBackground(Ui.outlined(this,
+				lit ? Theme.secondaryContainer : Theme.surfaceContainerHigh,
+				lit ? Theme.withAlpha(Theme.onSecondaryContainer, 0x26) : Theme.hairline,
+				18f, 1f));
+
+		TextView v = Ui.label(this, value, 24f,
+				lit ? Theme.onSecondaryContainer : Theme.text);
+		v.setTypeface(null, android.graphics.Typeface.BOLD);
+		v.setLetterSpacing(-0.03f);
+		v.setId(R.id.statValue);
+		tile.addView(v);
+
+		TextView l = Ui.label(this, label, 10.5f,
 				lit ? Theme.onSecondaryContainer : Theme.text2);
-	}
-
-	private TextView toneChip(CharSequence label, int background, int foreground) {
-		TextView t = Ui.label(this, label, 12f, foreground);
-		t.setTypeface(null, android.graphics.Typeface.BOLD);
-		t.setGravity(Gravity.CENTER);
-		t.setPadding(dp(12), dp(7), dp(12), dp(7));
-		t.setBackground(Ui.rounded(this, background, 999f));
-		return t;
+		l.setTypeface(null, android.graphics.Typeface.BOLD);
+		l.setLetterSpacing(0.1f);
+		l.setAllCaps(true);
+		l.setPadding(0, dp(2), 0, 0);
+		tile.addView(l);
+		return tile;
 	}
 
 	/** The System page's opening panel: who this device is, and whether it is up. */
 	private void systemHero(JSONObject st) {
 		LinearLayout hero = Ui.heroCard(this);
-		hero.setPadding(dp(22), dp(22), dp(22), dp(20));
+		hero.setPadding(dp(24), dp(24), dp(24), dp(22));
 		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
 				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-		lp.topMargin = dp(6);
+		lp.topMargin = dp(4);
 		pSystem.addView(hero, lp);
 
 		JSONObject self = st.optJSONObject("self");
@@ -1194,46 +1280,87 @@ public class MainActivity extends Activity {
 		String ip = tsIpv4(st);
 		boolean up = daemonUp(st);
 
+		LinearLayout top = new LinearLayout(this);
+		top.setOrientation(LinearLayout.HORIZONTAL);
+		top.setGravity(Gravity.CENTER_VERTICAL);
+
+		LinearLayout titles = col();
+		titles.addView(Ui.eyebrow(this, getString(R.string.page_system)));
 		TextView name = Ui.label(this,
-				host.isEmpty() ? getString(R.string.this_device) : host, 22f, Theme.text);
+				host.isEmpty() ? getString(R.string.this_device) : host, 27f, Theme.text);
 		name.setTypeface(null, android.graphics.Typeface.BOLD);
-		name.setLetterSpacing(-0.02f);
+		name.setLetterSpacing(-0.035f);
 		name.setSingleLine(true);
 		name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-		hero.addView(name);
+		name.setPadding(0, dp(2), 0, 0);
+		titles.addView(name);
+		top.addView(titles, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+		top.addView(Ui.iconTile(this, R.drawable.ic_device,
+				Theme.accentDim, Theme.accent, 50),
+				new LinearLayout.LayoutParams(dp(50), dp(50)));
+		hero.addView(top);
+
+		LinearLayout addrRow = new LinearLayout(this);
+		addrRow.setOrientation(LinearLayout.HORIZONTAL);
+		addrRow.setGravity(Gravity.CENTER_VERTICAL);
+		addrRow.setPadding(0, dp(12), 0, 0);
 
 		TextView addr = Ui.label(this,
-				ip.isEmpty() ? getString(R.string.not_signed_in) : ip, 13f, Theme.text2);
-		addr.setPadding(0, dp(5), 0, 0);
-		hero.addView(addr);
+				ip.isEmpty() ? getString(R.string.not_signed_in) : ip, 14f, Theme.text2);
+		addr.setTypeface(android.graphics.Typeface.MONOSPACE, 0);
+		addrRow.addView(addr);
+		if (!ip.isEmpty()) {
+			final String copyIp = ip;
+			View copy = iconButton(R.drawable.ic_copy, Theme.accent, R.string.copy,
+					v -> copy(copyIp));
+			LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(36), dp(36));
+			clp.leftMargin = dp(6);
+			addrRow.addView(copy, clp);
+		}
+		hero.addView(addrRow);
 
 		LinearLayout chips = new LinearLayout(this);
 		chips.setOrientation(LinearLayout.HORIZONTAL);
 		chips.setGravity(Gravity.CENTER_VERTICAL);
-		chips.setPadding(0, dp(15), 0, 0);
-
-		chips.addView(toneChip(getString(up ? R.string.daemon_running : R.string.daemon_off),
-				up ? Theme.successContainer : Theme.withAlpha(Theme.error, 0x24),
-				up ? Theme.success : Theme.error));
+		chips.setPadding(0, dp(16), 0, 0);
 
 		boolean in = signedIn(st);
-		TextView account = toneChip(getString(in ? R.string.connected : R.string.not_signed_in),
-				in ? Theme.secondaryContainer : Theme.surfaceContainerHighest,
-				in ? Theme.onSecondaryContainer : Theme.text2);
+		chips.addView(statusChip(getString(up ? R.string.daemon_running : R.string.daemon_off),
+				up ? Theme.successContainer : Theme.withAlpha(Theme.error, 0x24),
+				up ? Theme.success : Theme.error,
+				up ? Theme.success : Theme.error));
+
 		LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
 				ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		alp.leftMargin = dp(8);
-		chips.addView(account, alp);
-
-		if (supervisorUp(st)) {
-			TextView sup = toneChip(getString(R.string.supervisor),
-					Theme.surfaceContainerHighest, Theme.text2);
-			LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
-					ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-			slp.leftMargin = dp(8);
-			chips.addView(sup, slp);
-		}
+		chips.addView(statusChip(getString(in ? R.string.connected : R.string.not_signed_in),
+				in ? Theme.secondaryContainer : Theme.surfaceContainerHighest,
+				in ? Theme.onSecondaryContainer : Theme.text2,
+				in ? Theme.success : Theme.hint), alp);
 		hero.addView(chips);
+
+		Ui.stagger(top, addrRow, chips);
+	}
+
+	private LinearLayout statusChip(String label, int background, int foreground, int dot) {
+		LinearLayout chip = new LinearLayout(this);
+		chip.setOrientation(LinearLayout.HORIZONTAL);
+		chip.setGravity(Gravity.CENTER_VERTICAL);
+		chip.setPadding(dp(12), dp(8), dp(14), dp(8));
+		chip.setBackground(Ui.rounded(this, background, 999f));
+
+		View mark = new View(this);
+		mark.setBackground(Ui.rounded(this, dot, 999f));
+		LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(dp(7), dp(7));
+		mlp.rightMargin = dp(8);
+		chip.addView(mark, mlp);
+
+		TextView t = Ui.label(this, label, 12f, foreground);
+		t.setTypeface(null, android.graphics.Typeface.BOLD);
+		chip.addView(t);
+		return chip;
 	}
 
 	/** The device list with nothing in it still has to explain itself. */
@@ -1241,23 +1368,22 @@ public class MainActivity extends Activity {
 		LinearLayout box = new LinearLayout(this);
 		box.setOrientation(LinearLayout.VERTICAL);
 		box.setGravity(Gravity.CENTER_HORIZONTAL);
-		box.setPadding(dp(24), dp(30), dp(24), dp(30));
+		box.setPadding(dp(28), dp(36), dp(28), dp(36));
 
-		ImageView mark = new ImageView(this);
-		mark.setImageResource(R.drawable.ic_system);
-		mark.setColorFilter(Theme.hint);
-		box.addView(mark, new LinearLayout.LayoutParams(dp(34), dp(34)));
+		box.addView(Ui.iconTile(this, R.drawable.ic_device,
+				Theme.surfaceContainerHighest, Theme.hint, 56),
+				new LinearLayout.LayoutParams(dp(56), dp(56)));
 
-		TextView title = Ui.label(this, getString(R.string.no_peers_short), 16f, Theme.text);
+		TextView title = Ui.label(this, getString(R.string.no_peers_short), 18f, Theme.text);
 		title.setTypeface(null, android.graphics.Typeface.BOLD);
 		title.setGravity(Gravity.CENTER);
-		title.setPadding(0, dp(12), 0, 0);
+		title.setPadding(0, dp(16), 0, 0);
 		box.addView(title);
 
-		TextView sub = Ui.label(this, getString(R.string.no_peers_body), 13f, Theme.text2);
+		TextView sub = Ui.label(this, getString(R.string.no_peers_body), 13.5f, Theme.text2);
 		sub.setGravity(Gravity.CENTER);
 		sub.setLineSpacing(dp(4), 1f);
-		sub.setPadding(dp(8), dp(6), dp(8), 0);
+		sub.setPadding(dp(8), dp(7), dp(8), 0);
 		box.addView(sub);
 
 		g.addView(box);
@@ -1332,62 +1458,81 @@ public class MainActivity extends Activity {
 	private boolean receivedChecked;
 
 	private void stoppedCard() {
-		LinearLayout card = Ui.heroCard(this);
-		card.setPadding(dp(22), dp(22), dp(22), dp(20));
+		LinearLayout card = stateCard(R.drawable.ic_power,
+				getString(R.string.daemon_stopped_card),
+				getString(R.string.daemon_stopped_card_body),
+				Theme.error, Theme.errorContainer);
 		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
 				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		lp.topMargin = dp(14);
-		lp.bottomMargin = dp(8);
 		pSend.addView(card, lp);
-
-		TextView t = Ui.label(this, getString(R.string.daemon_stopped_card), 20f, Theme.text);
-		t.setTypeface(null, android.graphics.Typeface.BOLD);
-		card.addView(t);
-
-		TextView d = Ui.label(this, getString(R.string.daemon_stopped_card_body), 14f, Theme.text2);
-		d.setLineSpacing(dp(4), 1f);
-		d.setPadding(0, dp(8), 0, 0);
-		card.addView(d);
 
 		TextView go = Ui.button(this, getString(R.string.start_daemon), true);
 		go.setOnClickListener(v -> service("start"));
+		Ui.pressable(go);
 		LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(
-				ViewGroup.LayoutParams.MATCH_PARENT, dp(50));
-		glp.topMargin = dp(20);
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(52));
+		glp.topMargin = dp(18);
 		card.addView(go, glp);
 	}
 
 	private void signInCard() {
 		boolean up = daemonUp(status);
-		LinearLayout card = Ui.heroCard(this);
-		card.setPadding(dp(22), dp(22), dp(22), dp(20));
+		LinearLayout card = stateCard(R.drawable.ic_person,
+				getString(R.string.not_signed_in),
+				getString(R.string.sign_in_card_body),
+				Theme.accent, Theme.primaryContainer);
 		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
 				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		lp.topMargin = dp(14);
-		lp.bottomMargin = dp(8);
 		pSend.addView(card, lp);
-
-		TextView t = Ui.label(this, getString(R.string.not_signed_in), 20f, Theme.text);
-		t.setTypeface(null, android.graphics.Typeface.BOLD);
-		card.addView(t);
-
-		TextView d = Ui.label(this, getString(R.string.sign_in_card_body), 14f, Theme.text2);
-		d.setLineSpacing(dp(4), 1f);
-		d.setPadding(0, dp(8), 0, 0);
-		card.addView(d);
 
 		TextView go = Ui.button(this, getString(R.string.sign_in), true);
 		go.setOnClickListener(v -> doLogin());
+		Ui.pressable(go);
 		LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(
-				ViewGroup.LayoutParams.MATCH_PARENT, dp(50));
-		glp.topMargin = dp(20);
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(52));
+		glp.topMargin = dp(18);
 		card.addView(go, glp);
 
 		if (!up) {
-			TextView hint = Ui.label(this, getString(R.string.sign_in_needs_daemon), 12f, Theme.hint);
-			hint.setPadding(0, dp(14), 0, 0);
+			TextView hint = Ui.label(this, getString(R.string.sign_in_needs_daemon), 12.5f,
+					Theme.hint);
+			hint.setPadding(0, dp(12), 0, 0);
 			card.addView(hint);
 		}
+	}
+
+	/** A card that states one problem, then offers the one thing that fixes it. */
+	private LinearLayout stateCard(int icon, String title, String body, int tone, int container) {
+		LinearLayout card = new LinearLayout(this);
+		card.setOrientation(LinearLayout.VERTICAL);
+		card.setPadding(dp(20), dp(20), dp(20), dp(20));
+		card.setBackground(Ui.outlined(this,
+				Theme.mix(Theme.surfaceContainerHigh, container,
+						Theme.isDark ? 0.26f : 0.34f),
+				Theme.withAlpha(tone, 0x3D), 24f, 1f));
+		card.setClipToOutline(true);
+
+		LinearLayout head = new LinearLayout(this);
+		head.setOrientation(LinearLayout.HORIZONTAL);
+		head.setGravity(Gravity.CENTER_VERTICAL);
+		head.addView(Ui.iconTile(this, icon, Theme.withAlpha(tone, 0x1F), tone, 42),
+				tileParams());
+
+		LinearLayout col = col();
+		TextView t = Ui.label(this, title, 17f, Theme.text);
+		t.setTypeface(null, android.graphics.Typeface.BOLD);
+		t.setLetterSpacing(-0.02f);
+		col.addView(t);
+		TextView d = Ui.label(this, body, 13.5f, Theme.text2);
+		d.setLineSpacing(dp(4), 1f);
+		d.setPadding(0, dp(5), 0, 0);
+		col.addView(d);
+		head.addView(col, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		card.addView(head);
+		return card;
 	}
 
 	private String lastSeenLabel(String iso) {
@@ -1417,17 +1562,20 @@ public class MainActivity extends Activity {
 	private View peerRow(Api.Peer p) {
 		LinearLayout row = row();
 		final boolean up = p.online;
+		final boolean picked = up && chosen.contains(p.name);
 
 		row.addView(Ui.avatar(this, p.name, up));
 
-		Ui.Toggle cb = Ui.toggle(this, up && chosen.contains(p.name));
+		Ui.Toggle cb = Ui.toggle(this, picked);
 		cb.setEnabled(up);
 		cb.setAlpha(up ? 1f : 0.4f);
 
 		LinearLayout col = col();
-		col.setPadding(dp(12), 0, dp(6), 0);
-		TextView n = Ui.label(this, p.name, 15f, (up ? Theme.text : Theme.hint));
+		col.setPadding(dp(13), 0, dp(6), 0);
+		TextView n = Ui.label(this, p.name, 15.5f, (up ? Theme.text : Theme.text2));
+		n.setTypeface(null, android.graphics.Typeface.BOLD);
 		n.setSingleLine(true);
+		n.setEllipsize(android.text.TextUtils.TruncateAt.END);
 		col.addView(n);
 		TextView meta = new TextView(this);
 		String when = up ? "" : lastSeenLabel(p.lastSeen);
@@ -1441,16 +1589,15 @@ public class MainActivity extends Activity {
 		}
 		meta.setText(p.ip
 				+ (p.os.isEmpty() ? "" : "  ·  " + p.os)
-				+ (up ? "  ·  " + link : "")
-				+ (p.exitNode ? "  ·  " + getString(R.string.exit_node_suffix) : "")
-				+ (p.exitNodeOption && !p.exitNode
-					? "  ·  " + getString(R.string.exit_node_offer) : "")
-				+ (up ? "" : "  ·  " + getString(R.string.peer_offline_label)
-					+ (when.isEmpty() ? "" : "  ·  " + when)));
+				+ (up ? "  ·  " + link
+					: "  ·  " + getString(R.string.peer_offline_label)
+						+ (when.isEmpty() ? "" : "  ·  " + when)));
 		meta.setTextColor(Theme.text2);
-		meta.setTextSize(12);
+		meta.setTextSize(12.5f);
+		meta.setMaxLines(2);
+		meta.setLineSpacing(dp(2), 1f);
 		meta.setIncludeFontPadding(false);
-		meta.setPadding(0, dp(3), 0, 0);
+		meta.setPadding(0, dp(4), 0, 0);
 		col.addView(meta);
 		row.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -1459,11 +1606,13 @@ public class MainActivity extends Activity {
 		slp.leftMargin = dp(4);
 		row.addView(cb, slp);
 
-		View send = iconButton(R.drawable.ic_send, up ? Theme.text : Theme.hint,
+		View send = iconButton(R.drawable.ic_send, up ? Theme.accent : Theme.hint,
 				R.string.send, v -> launchPicker(java.util.Collections.singletonList(p.ip)));
 		send.setEnabled(up);
 		send.setAlpha(up ? 1f : 0.35f);
-		row.addView(send);
+		LinearLayout.LayoutParams sendLp = new LinearLayout.LayoutParams(dp(44), dp(44));
+		sendLp.leftMargin = dp(2);
+		row.addView(send, sendLp);
 
 		OnToggle peer = () -> {
 			if (!up) {
@@ -1480,14 +1629,28 @@ public class MainActivity extends Activity {
 			// show a tick used to cost a root round-trip and reset the
 			// scroll position for a switch that had already moved.
 			cb.setChecked(now);
+			paintPeerRow(row, now);
 			saveTargets();
 			updateSendButton();
 		};
 		row.setOnClickListener(v -> peer.run());
 		row.setClickable(true);
-		row.setBackground(Ui.press(this));
+		paintPeerRow(row, picked);
+		Ui.pressable(row);
 		cb.setOnCheckedChangeListener(on -> peer.run());
 		return row;
+	}
+
+	/** The row itself carries the selection, not just the switch on its end. */
+	private void paintPeerRow(View row, boolean picked) {
+		if (picked) {
+			row.setBackground(Ui.ripple(this,
+					Ui.rounded(this, Theme.withAlpha(Theme.secondaryContainer,
+							Theme.isDark ? 0x66 : 0x99), 20f),
+					Theme.withAlpha(Theme.onSurface, 0x1F), null));
+		} else {
+			row.setBackground(Ui.press(this, 20f));
+		}
 	}
 
 	private View iconButton(int drawable, int color, int label, View.OnClickListener l) {
@@ -1563,6 +1726,13 @@ public class MainActivity extends Activity {
 		sendBtn.setEnabled(on);
 		sendBtn.setTextColor(on ? Theme.onPrimary : Theme.onSurfaceVariant);
 		sendBtn.setBackground(Ui.primaryButton(this, on));
+		if (heroSelected != null) {
+			heroSelected.setText(String.valueOf(n));
+		}
+		android.graphics.drawable.Drawable arrow = sendBtn.getCompoundDrawables()[0];
+		if (arrow != null) {
+			arrow.setTint(on ? Theme.onPrimary : Theme.onSurfaceVariant);
+		}
 		if (n == 1) {
 			sendBtn.setText(getString(R.string.send_to, chosen.iterator().next()));
 		} else if (n > 1) {
@@ -1731,134 +1901,52 @@ public class MainActivity extends Activity {
 		}).start();
 	}
 
-	private String currentExitNodeIp(JSONObject st) {
-		if (st == null) {
-			return "";
-		}
-		JSONObject en = st.optJSONObject("exitNode");
-		return en == null ? "" : en.optString("ip", "");
-	}
-
-	private String exitNodeSummary(JSONObject st) {
-		String ip = currentExitNodeIp(st);
-		if (ip.isEmpty()) {
-			return getString(R.string.exit_node_none);
-		}
-		JSONObject en = st.optJSONObject("exitNode");
-		if (en != null) {
-			List<Api.Peer> ps = Api.peersFrom(st);
-			for (Api.Peer p : ps) {
-				if (ip.equals(p.ip)) {
-					return p.name;
-				}
-			}
-		}
-		return ip;
-	}
-
-	private void showExitNodePicker(JSONObject st, List<Api.Peer> candidates) {
-		final List<String> labels = new ArrayList<>();
-		final List<String> values = new ArrayList<>();
-		labels.add(getString(R.string.exit_node_none));
-		values.add("none");
-		for (Api.Peer p : candidates) {
-			labels.add(p.name + (p.online ? "" : "  (" + getString(R.string.peer_offline_label) + ")"));
-			values.add(p.ip);
-		}
-
-		final String cur = currentExitNodeIp(st);
-		int checked = values.indexOf(cur);
-		if (checked < 0) {
-			checked = 0;
-		}
-
-		Sheet.choice(this, getString(R.string.t_use_exit),
-				labels.toArray(new CharSequence[0]), checked, which -> {
-					final String value = values.get(which);
-					if (value.equals(cur)) {
-						return;
-					}
-					new Thread(() -> {
-						String err = null;
-						try {
-							Api.set("exit-node", value);
-						} catch (Exception e) {
-							err = String.valueOf(e.getMessage());
-						}
-						final String e2 = err;
-						ui.post(() -> {
-							if (e2 == null) {
-								toast(getString(R.string.exit_node_set,
-										"none".equals(value)
-												? getString(R.string.exit_node_none)
-												: labels.get(values.indexOf(value))));
-							}
-							refresh();
-						});
-					}).start();
-				});
-	}
-
 	private void buildSettings(JSONObject st) {
 		pSettings.removeAllViews();
 		switches.clear();
 		Map<String, Boolean> flags = Api.flagsFrom(st);
 		boolean online = daemonUp(st);
 
+		settingsHero(st, online);
+
 		LinearLayout c1 = group(pSettings, getString(R.string.connectivity));
-		addToggle(c1, "accept-dns", getString(R.string.t_accept_dns),
+		action(c1, R.drawable.ic_globe, getString(R.string.dns_dns_row),
+				getString(R.string.dns_dns_row_sub), v -> tab(1));
+		addToggle(c1, R.drawable.ic_check, "accept-dns", getString(R.string.t_accept_dns),
 				getString(R.string.t_accept_dns_sub), flags, online);
-		addToggle(c1, "accept-routes", getString(R.string.t_accept_routes),
+		addToggle(c1, R.drawable.ic_route, "accept-routes", getString(R.string.t_accept_routes),
 				getString(R.string.t_accept_routes_sub), flags, online);
-		addToggle(c1, "shields-up", getString(R.string.t_shields_up),
+		addToggle(c1, R.drawable.ic_shield, "shields-up", getString(R.string.t_shields_up),
 				getString(R.string.t_shields_up_sub), flags, online);
 
-		List<Api.Peer> candidates = new ArrayList<>();
-		for (Api.Peer pp : Api.peersFrom(st)) {
-			if (pp.exitNodeOption) {
-				candidates.add(pp);
-			}
-		}
-		if (online) {
-			final String curIp = currentExitNodeIp(st);
-			final List<Api.Peer> finalCands = candidates;
-			action(c1, getString(R.string.t_use_exit), exitNodeSummary(st),
-					v -> showExitNodePicker(st, finalCands));
-		}
-
 		LinearLayout c2 = group(pSettings, getString(R.string.services));
-		addToggle(c2, "run-ssh", getString(R.string.t_ssh),
+		addToggle(c2, R.drawable.ic_terminal, "run-ssh", getString(R.string.t_ssh),
 				getString(R.string.t_ssh_sub), flags, online);
+		addToggle(c2, R.drawable.ic_globe, "run-webclient", getString(R.string.t_webclient),
+				getString(R.string.t_webclient_sub), flags, online);
+
+		// Advertising ranges and NATing them is what turns this phone into a
+		// subnet router. Both flags exist on `tailscale set`, so both are
+		// reachable here instead of only from a terminal.
+		LinearLayout c4 = group(pSettings, getString(R.string.routing));
+		JSONObject prefsForRoutes = st.optJSONObject("prefs");
+		c4.addView(routesRow(prefsForRoutes, online));
+		line(c4);
+		Ui.Toggle snat = addToggle(c4, R.drawable.ic_route, "snat-subnet-routes",
+				getString(R.string.t_snat), getString(R.string.t_snat_sub), flags, online);
+		// NAT only exists for traffic that a route brought in. With nothing
+		// advertised the switch cannot do anything, so it says so by being
+		// dimmed rather than accepting a write that changes nothing.
+		boolean hasRoutes = !currentRoutes(prefsForRoutes).isEmpty();
+		if (online && !hasRoutes) {
+			setRowEnabled(snat, false);
+		}
 
 		LinearLayout c3 = group(pSettings, getString(R.string.this_device));
-		JSONObject prefs = st.optJSONObject("prefs");
-		LinearLayout hr = new LinearLayout(this);
-		hr.setOrientation(LinearLayout.HORIZONTAL);
-		hr.setGravity(Gravity.CENTER_VERTICAL);
-		hr.setPadding(dp(16), dp(6), dp(16), dp(10));
-		EditText in = new EditText(this);
-		in.setHint(getString(R.string.hostname_hint));
-		in.setText(prefs == null ? "" : prefs.optString("hostname", ""));
-		in.setSingleLine(true);
-		in.setTextColor(Theme.text);
-		in.setHintTextColor(Theme.hint);
-		in.setTextSize(15);
-		in.setPadding(dp(14), 0, dp(14), 0);
-		in.setBackground(Ui.fieldBg(this));
-		hr.addView(in, new LinearLayout.LayoutParams(0, dp(50), 1f));
-
-		TextView apply = Ui.tonal(this, getString(R.string.apply));
-		apply.setEnabled(online);
-		apply.setAlpha(online ? 1f : 0.4f);
-		apply.setOnClickListener(v -> applyPref("hostname",
-				in.getText().toString().trim(), getString(R.string.hostname)));
-		LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
-				ViewGroup.LayoutParams.WRAP_CONTENT, dp(50));
-		alp.leftMargin = dp(10);
-		hr.addView(apply, alp);
-		c3.addView(hr);
+		c3.addView(hostnameRow(prefsForRoutes == null ? ""
+				: prefsForRoutes.optString("hostname", ""), online));
 		line(c3);
-		action(c3, getString(R.string.forget_targets),
+		action(c3, R.drawable.ic_trash, getString(R.string.forget_targets),
 				getString(R.string.forget_targets_sub), v -> {
 					chosen.clear();
 					saveTargets();
@@ -1869,8 +1957,13 @@ public class MainActivity extends Activity {
 		// Appearance sits last on purpose: it is the group someone goes
 		// looking for once, not the one they came to this tab for.
 		LinearLayout ap = group(pSettings, getString(R.string.appearance));
-		action(ap, getString(R.string.theme_mode), themeModeLabel(), v -> showThemePicker());
-		Ui.Toggle dyn = addSwitch(ap, getString(R.string.dynamic_color),
+		TextView themeSub = Ui.label(this, themeModeSub(), 12.5f, Theme.text2);
+		themeSub.setId(R.id.rowSub);
+		ap.addView(themeRow(themeSub));
+		ap.addView(themeSegment());
+		line(ap);
+		Ui.Toggle dyn = addSwitch(ap, R.drawable.ic_spark,
+				getString(R.string.dynamic_color),
 				android.os.Build.VERSION.SDK_INT >= 31
 						? getString(R.string.dynamic_color_sub)
 						: getString(R.string.dynamic_color_unavailable),
@@ -1879,18 +1972,16 @@ public class MainActivity extends Activity {
 					recreate();
 				});
 		boolean canDynamic = android.os.Build.VERSION.SDK_INT >= 31;
-		dyn.setEnabled(canDynamic);
-		dyn.setAlpha(canDynamic ? 1f : 0.4f);
+		setRowEnabled(dyn, canDynamic);
 
 		boolean dark = Theme.darkNow(this);
-		Ui.Toggle black = addSwitch(ap, getString(R.string.amoled),
+		Ui.Toggle black = addSwitch(ap, R.drawable.ic_moon, getString(R.string.amoled),
 				dark ? getString(R.string.amoled_sub) : getString(R.string.amoled_needs_dark),
 				dark && Theme.amoled(this), on -> {
 					Theme.setAmoled(this, on);
 					recreate();
 				});
-		black.setEnabled(dark);
-		black.setAlpha(dark ? 1f : 0.4f);
+		setRowEnabled(black, dark);
 
 		if (!online) {
 			note(pSettings, getString(R.string.daemon_stopped_note));
@@ -1898,39 +1989,296 @@ public class MainActivity extends Activity {
 		note(pSettings, getString(R.string.footnote));
 	}
 
-	private String themeModeLabel() {
+	/** The Settings page leads with a sentence, not with the first switch. */
+	private void settingsHero(JSONObject st, boolean online) {
+		LinearLayout hero = Ui.heroCard(this);
+		hero.setPadding(dp(24), dp(24), dp(24), dp(22));
+		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		lp.topMargin = dp(4);
+		pSettings.addView(hero, lp);
+
+		LinearLayout top = new LinearLayout(this);
+		top.setOrientation(LinearLayout.HORIZONTAL);
+		top.setGravity(Gravity.CENTER_VERTICAL);
+		hero.addView(top);
+
+		LinearLayout titles = col();
+		titles.addView(Ui.eyebrow(this, getString(R.string.page_settings)));
+		TextView title = Ui.label(this, getString(R.string.settings_hero_title), 28f,
+				Theme.text);
+		title.setTypeface(null, android.graphics.Typeface.BOLD);
+		title.setLetterSpacing(-0.035f);
+		title.setPadding(0, dp(2), 0, 0);
+		titles.addView(title);
+		top.addView(titles, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+		top.addView(Ui.iconTile(this, R.drawable.ic_settings,
+				Theme.accentDim, Theme.accent, 50),
+				new LinearLayout.LayoutParams(dp(50), dp(50)));
+
+		TextView body = Ui.label(this, getString(R.string.settings_hero_body), 13.5f,
+				Theme.text2);
+		body.setLineSpacing(dp(5), 1f);
+		body.setPadding(0, dp(14), 0, 0);
+		hero.addView(body);
+
+		LinearLayout chips = new LinearLayout(this);
+		chips.setOrientation(LinearLayout.HORIZONTAL);
+		chips.setPadding(0, dp(16), 0, 0);
+		chips.addView(statusChip(getString(online ? R.string.daemon_running
+						: R.string.daemon_off),
+				online ? Theme.successContainer : Theme.withAlpha(Theme.error, 0x24),
+				online ? Theme.success : Theme.error,
+				online ? Theme.success : Theme.error));
+
+		boolean in = signedIn(st);
+		LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		alp.leftMargin = dp(8);
+		chips.addView(statusChip(getString(in ? R.string.connected
+						: R.string.not_signed_in),
+				in ? Theme.secondaryContainer : Theme.surfaceContainerHighest,
+				in ? Theme.onSecondaryContainer : Theme.text2,
+				in ? Theme.success : Theme.hint), alp);
+		hero.addView(chips);
+
+		Ui.stagger(top, body, chips);
+	}
+
+	/** The device-name editor, laid out as a row rather than a bare field. */
+	private View hostnameRow(String current, boolean online) {
+		LinearLayout row = row();
+		row.addView(Ui.iconTile(this, R.drawable.ic_device,
+				Theme.accentDim, Theme.accent, 40), tileParams());
+
+		LinearLayout col = col();
+		TextView label = Ui.label(this, getString(R.string.hostname), 15.5f, Theme.text);
+		label.setTypeface(null, android.graphics.Typeface.BOLD);
+		col.addView(label);
+
+		LinearLayout entry = new LinearLayout(this);
+		entry.setOrientation(LinearLayout.HORIZONTAL);
+		entry.setGravity(Gravity.CENTER_VERTICAL);
+		entry.setPadding(0, dp(9), 0, 0);
+
+		EditText in = new EditText(this);
+		in.setHint(getString(R.string.hostname_hint));
+		in.setText(current);
+		in.setSingleLine(true);
+		in.setTextColor(Theme.text);
+		in.setHintTextColor(Theme.hint);
+		in.setTextSize(14.5f);
+		in.setGravity(Gravity.CENTER_VERTICAL);
+		in.setPadding(dp(14), 0, dp(14), 0);
+		in.setBackground(Ui.fieldBg(this));
+		entry.addView(in, new LinearLayout.LayoutParams(0, dp(46), 1f));
+
+		TextView apply = Ui.tonal(this, getString(R.string.apply));
+		apply.setEnabled(online);
+		apply.setAlpha(online ? 1f : 0.4f);
+		apply.setOnClickListener(v -> applyPref("hostname",
+				in.getText().toString().trim(), getString(R.string.hostname)));
+		LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.WRAP_CONTENT, dp(46));
+		alp.leftMargin = dp(8);
+		entry.addView(apply, alp);
+		col.addView(entry);
+
+		row.addView(col, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		return row;
+	}
+
+	/**
+	 * Advertised subnet routes: a small plate, not a dialog.
+	 *
+	 * <p>Most people either have no routes or have exactly one, so the
+	 * current value stays visible and editable in place. Formatting is
+	 * normalised on save, because "192.168.1.0/24,10.0.0.0/16" and
+	 * "192.168.1.0/24, 10.0.0.0/16" mean the same thing.
+	 */
+	private View routesRow(JSONObject prefs, boolean online) {
+		LinearLayout row = row();
+		row.addView(Ui.iconTile(this, R.drawable.ic_route,
+				Theme.accentDim, Theme.accent, 40), tileParams());
+
+		LinearLayout col = col();
+		TextView label = Ui.label(this, getString(R.string.advertise_routes), 15.5f,
+				Theme.text);
+		label.setTypeface(null, android.graphics.Typeface.BOLD);
+		col.addView(label);
+		TextView sub = Ui.label(this, getString(R.string.advertise_routes_sub), 12.5f,
+				Theme.text2);
+		sub.setPadding(0, dp(3), 0, 0);
+		col.addView(sub);
+
+		LinearLayout entry = new LinearLayout(this);
+		entry.setOrientation(LinearLayout.HORIZONTAL);
+		entry.setGravity(Gravity.CENTER_VERTICAL);
+		entry.setPadding(0, dp(9), 0, 0);
+
+		EditText in = new EditText(this);
+		in.setHint(getString(R.string.routes_hint));
+		in.setText(currentRoutes(prefs));
+		in.setSingleLine(true);
+		in.setTextColor(Theme.text);
+		in.setHintTextColor(Theme.hint);
+		in.setTextSize(13.5f);
+		in.setTypeface(android.graphics.Typeface.MONOSPACE);
+		in.setGravity(Gravity.CENTER_VERTICAL);
+		in.setPadding(dp(14), 0, dp(14), 0);
+		in.setBackground(Ui.fieldBg(this));
+		entry.addView(in, new LinearLayout.LayoutParams(0, dp(46), 1f));
+
+		TextView apply = Ui.tonal(this, getString(R.string.apply));
+		apply.setEnabled(online);
+		apply.setAlpha(online ? 1f : 0.4f);
+		apply.setOnClickListener(v -> {
+			String raw = in.getText().toString().replace(" ", "");
+			if (!validCidrs(raw)) {
+				toast(getString(R.string.routes_invalid));
+				Ui.pop(in);
+				return;
+			}
+			applyPref("advertise-routes", raw, getString(R.string.advertise_routes));
+		});
+		LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.WRAP_CONTENT, dp(46));
+		alp.leftMargin = dp(8);
+		entry.addView(apply, alp);
+		col.addView(entry);
+
+		row.addView(col, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		return row;
+	}
+
+	/** The daemon's advertised ranges, minus the exit-node default route. */
+	private static String currentRoutes(JSONObject prefs) {
+		if (prefs == null) {
+			return "";
+		}
+		JSONArray arr = prefs.optJSONArray("advertiseRoutes");
+		if (arr == null) {
+			return "";
+		}
+		StringBuilder sb = new StringBuilder();
+		for (int i = 0; i < arr.length(); i++) {
+			String r = arr.optString(i, "").trim();
+			if (r.isEmpty() || "0.0.0.0/0".equals(r) || "::/0".equals(r)) {
+				continue;
+			}
+			if (sb.length() > 0) {
+				sb.append(", ");
+			}
+			sb.append(r);
+		}
+		return sb.toString();
+	}
+
+	private static boolean validCidrs(String v) {
+		if (v.isEmpty()) {
+			return true;
+		}
+		for (String part : v.split(",")) {
+			if (!part.matches("^[0-9a-fA-F.:]+/[0-9]{1,3}$")) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** The label half of the Theme row; the segment control sits underneath. */
+	private View themeRow(TextView sub) {
+		LinearLayout row = row();
+		row.addView(Ui.iconTile(this, R.drawable.ic_palette,
+				Theme.accentDim, Theme.accent, 40), tileParams());
+
+		LinearLayout col = col();
+		TextView t = Ui.label(this, getString(R.string.theme_mode), 15.5f, Theme.text);
+		t.setTypeface(null, android.graphics.Typeface.BOLD);
+		col.addView(t);
+		sub.setPadding(0, dp(3), 0, 0);
+		col.addView(sub);
+		row.addView(col, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		return row;
+	}
+
+	/** Three choices, all visible, one already filled: no popup needed. */
+	private View themeSegment() {
+		LinearLayout seg = new LinearLayout(this);
+		seg.setOrientation(LinearLayout.HORIZONTAL);
+		seg.setBackground(Ui.fieldBg(this));
+		LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
+		slp.leftMargin = dp(18);
+		slp.rightMargin = dp(18);
+		slp.bottomMargin = dp(16);
+		seg.setLayoutParams(slp);
+		seg.setPadding(dp(4), dp(4), dp(4), dp(4));
+
+		int now = Theme.mode(this);
+		int[] modes = { Theme.MODE_SYSTEM, Theme.MODE_LIGHT, Theme.MODE_DARK };
+		int[] labels = { R.string.theme_system, R.string.theme_light, R.string.theme_dark };
+		for (int i = 0; i < modes.length; i++) {
+			final int mode = modes[i];
+			boolean on = mode == now;
+			TextView b = Ui.label(this, getString(labels[i]), 13f,
+					on ? Theme.onSecondaryContainer : Theme.text2);
+			b.setTypeface(null, on ? android.graphics.Typeface.BOLD
+					: android.graphics.Typeface.NORMAL);
+			b.setGravity(Gravity.CENTER);
+			b.setBackground(on
+					? Ui.ripple(this, Ui.rounded(this, Theme.secondaryContainer, 999f),
+							Theme.withAlpha(Theme.onSecondaryContainer, 0x33), null)
+					: Ui.press(this, 999f));
+			b.setClickable(true);
+			b.setFocusable(true);
+			b.setOnClickListener(v -> {
+				if (Theme.mode(this) != mode) {
+					Theme.setMode(this, mode);
+					recreate();
+				}
+			});
+			LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(40), 1f);
+			seg.addView(b, lp);
+		}
+		return seg;
+	}
+
+	private String themeModeSub() {
 		switch (Theme.mode(this)) {
 			case Theme.MODE_LIGHT:
-				return getString(R.string.theme_light);
+				return getString(R.string.theme_light_sub);
 			case Theme.MODE_DARK:
-				return getString(R.string.theme_dark);
+				return getString(R.string.theme_dark_sub);
 			default:
-				return getString(R.string.theme_system);
+				return getString(R.string.theme_system_sub);
 		}
 	}
 
-	private void showThemePicker() {
-		int current = Theme.mode(this);
-		Sheet.choice(this, getString(R.string.theme_mode), new CharSequence[] {
-				getString(R.string.theme_system),
-				getString(R.string.theme_light),
-				getString(R.string.theme_dark),
-		}, current, which -> {
-			if (which == Theme.mode(this)) {
-				return;
-			}
-			Theme.setMode(this, which);
-			recreate();
-		});
+	private Ui.Toggle addToggle(LinearLayout g, int icon, String key, String label,
+			String desc, Map<String, Boolean> flags, boolean online) {
+		Ui.Toggle sw = addSwitch(g, icon, label,
+				online ? desc : desc + "  ·  " + getString(R.string.needs_daemon),
+				flags.getOrDefault(key, false),
+				checked -> applyPref(key, String.valueOf(checked), label));
+		setRowEnabled(sw, online);
+		switches.put(key, sw);
+		return sw;
 	}
 
-	private void addToggle(LinearLayout g, String key, String label, String desc,
-			Map<String, Boolean> flags, boolean online) {
-		Ui.Toggle sw = addSwitch(g, label, desc, flags.getOrDefault(key, false),
-				checked -> applyPref(key, String.valueOf(checked), label));
-		sw.setEnabled(online);
-		sw.setAlpha(online ? 1f : 0.4f);
-		switches.put(key, sw);
+	/** Dim the whole row, not just the 52dp switch, when a control is unavailable. */
+	private void setRowEnabled(Ui.Toggle sw, boolean on) {
+		sw.setEnabled(on);
+		View row = sw.getParent() instanceof View ? (View) sw.getParent() : null;
+		if (row != null) {
+			row.setEnabled(on);
+			row.setAlpha(on ? 1f : 0.52f);
+		}
 	}
 
 	private void applyPref(String key, String value, String label) {
@@ -1938,9 +2286,21 @@ public class MainActivity extends Activity {
 			try {
 				final JSONObject st = Api.set(key, value);
 				ui.post(() -> {
-					toast(label + " " + (isTrue(value) ? "on" : "off"));
+					if ("hostname".equals(key)) {
+						toast(getString(R.string.hostname_saved));
+					} else if ("advertise-routes".equals(key)) {
+						toast(getString(R.string.routes_saved));
+					} else {
+						toast(getString(isTrue(value) ? R.string.turned_on
+								: R.string.turned_off, label));
+					}
 					status = st;
-					buildSettings(st);
+					// Both tabs carry daemon preferences (accept-dns lives on
+					// Settings and on DNS), so mark them and rebuild whichever
+					// is on screen instead of assuming Settings.
+					dirty[1] = true;
+					dirty[2] = true;
+					buildVisible();
 				});
 			} catch (Root.Denied e) {
 				ui.post(() -> toast(getString(R.string.need_root_short)));
@@ -1952,7 +2312,9 @@ public class MainActivity extends Activity {
 					// hand, which left that row dead for the rest of the
 					// session.
 					if (status != null) {
-						buildSettings(status);
+						dirty[1] = true;
+						dirty[2] = true;
+						buildVisible();
 					}
 				});
 			}
@@ -1961,6 +2323,876 @@ public class MainActivity extends Activity {
 
 	private static boolean isTrue(String v) {
 		return "true".equals(v);
+	}
+
+	// ──────────────────────────────────────────────────────────────── DNS
+	//
+	// Two layers, on purpose.
+	//
+	// The daemon owns a few DNS facts: whether this phone accepts the
+	// tailnet's resolvers, and the tailnet's own domain. Those work without
+	// any account and stay live through the module's API.
+	//
+	// Global nameservers, search domains and MagicDNS are tailnet state held
+	// by the control plane. The daemon cannot change them, so the page asks
+	// for one API token, keeps it in the app's private storage, and edits
+	// them over Tailscale's v2 API. Without a token the page is still
+	// useful; with one it replaces the console tab.
+
+	/** One read of the control-plane DNS document, cached for the page. */
+	private static final class DnsData {
+		final List<String> nameservers;
+		final List<String> searchPaths;
+		final boolean magicDns;
+		/** Non-null when the last read failed; the lists are then stale. */
+		final String error;
+		final long at;
+
+		DnsData(List<String> nameservers, List<String> searchPaths, boolean magicDns,
+				String error, long at) {
+			this.nameservers = nameservers;
+			this.searchPaths = searchPaths;
+			this.magicDns = magicDns;
+			this.error = error;
+			this.at = at;
+		}
+	}
+
+	private DnsData dnsData;
+	private boolean dnsLoading;
+	/** Bumped per request so a slow answer cannot overwrite a newer one. */
+	private int dnsEpoch;
+
+	private static final String DNS_CONSOLE_URL = "https://login.tailscale.com/admin/dns";
+	private static final String TOKEN_URL = "https://login.tailscale.com/admin/settings/keys";
+
+	/** The providers most people are actually reaching for. */
+	private static final int[] DNS_PRESET_LABELS = {
+			R.string.dns_provider_cloudflare,
+			R.string.dns_provider_google,
+			R.string.dns_provider_quad9,
+			R.string.dns_provider_adguard,
+			R.string.dns_provider_nextdns,
+	};
+	private static final String[] DNS_PRESET_VALUES = {
+			"1.1.1.1, 1.0.0.1",
+			"8.8.8.8, 8.8.4.4",
+			"9.9.9.9, 149.112.112.112",
+			"94.140.14.14, 94.140.15.15",
+			"https://dns.nextdns.io/",
+	};
+
+	private void buildDns(JSONObject st) {
+		pDns.removeAllViews();
+		boolean online = daemonUp(st);
+		boolean wired = CloudApi.connected(this);
+
+		dnsHero(st, online, wired);
+
+		if (wired) {
+			maybeLoadDns(false);
+			if (dnsData != null && dnsData.error != null) {
+				dnsErrorCard(dnsData.error);
+			} else if (dnsData == null) {
+				dnsLoadingCard();
+			} else {
+				dnsMagicCard();
+				dnsNameserverCard();
+				dnsSearchCard();
+			}
+			dnsAccountCard();
+		} else {
+			dnsConnectCard();
+		}
+
+		Map<String, Boolean> flags = Api.flagsFrom(st);
+		LinearLayout local = group(pDns, getString(R.string.this_device));
+		addToggle(local, R.drawable.ic_device, "accept-dns",
+				getString(R.string.t_accept_dns),
+				getString(R.string.dns_local_row_sub), flags, online);
+
+		JSONObject tn = st.optJSONObject("tailnet");
+		String name = tn == null ? "" : tn.optString("name", "").trim();
+		if (!name.isEmpty()) {
+			local.addView(dnsNameRow(name), insetBlockParams());
+		}
+
+		LinearLayout console = group(pDns, getString(R.string.dns_console_group));
+		action(console, R.drawable.ic_globe, getString(R.string.dns_open_console),
+				getString(R.string.dns_console_row_sub), v -> open(DNS_CONSOLE_URL));
+		note(pDns, getString(R.string.dns_rename_hint));
+	}
+
+	private void dnsHero(JSONObject st, boolean online, boolean wired) {
+		LinearLayout hero = Ui.heroCard(this);
+		hero.setPadding(dp(24), dp(24), dp(24), dp(22));
+		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		lp.topMargin = dp(4);
+		pDns.addView(hero, lp);
+
+		JSONObject tn = st.optJSONObject("tailnet");
+		String name = tn == null ? "" : tn.optString("name", "").trim();
+		boolean magic = dnsData != null && dnsData.error == null
+				? dnsData.magicDns
+				: tn != null && tn.optBoolean("magicDNS", false);
+
+		LinearLayout top = new LinearLayout(this);
+		top.setOrientation(LinearLayout.HORIZONTAL);
+		top.setGravity(Gravity.CENTER_VERTICAL);
+
+		LinearLayout titles = col();
+		titles.addView(Ui.eyebrow(this, getString(R.string.page_dns)));
+		TextView title = Ui.label(this,
+				name.isEmpty() ? getString(R.string.dns_hero_fallback_title) : name,
+				26f, Theme.text);
+		title.setTypeface(null, android.graphics.Typeface.BOLD);
+		title.setLetterSpacing(-0.035f);
+		title.setSingleLine(true);
+		title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+		title.setPadding(0, dp(2), 0, 0);
+		titles.addView(title);
+		top.addView(titles, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		top.addView(Ui.iconTile(this, R.drawable.ic_globe,
+				Theme.accentDim, Theme.accent, 50),
+				new LinearLayout.LayoutParams(dp(50), dp(50)));
+		hero.addView(top);
+
+		TextView body = Ui.label(this, getString(R.string.dns_hero_body), 13.5f, Theme.text2);
+		body.setLineSpacing(dp(5), 1f);
+		body.setPadding(0, dp(14), 0, 0);
+		hero.addView(body);
+
+		LinearLayout chips = new LinearLayout(this);
+		chips.setOrientation(LinearLayout.HORIZONTAL);
+		chips.setGravity(Gravity.CENTER_VERTICAL);
+		chips.setPadding(0, dp(16), 0, 0);
+		chips.addView(statusChip(getString(magic ? R.string.dns_magic_on
+						: R.string.dns_magic_off),
+				magic ? Theme.successContainer : Theme.withAlpha(Theme.error, 0x1F),
+				magic ? Theme.success : Theme.text2,
+				magic ? Theme.success : Theme.hint));
+
+		if (dnsData != null && dnsData.error == null) {
+			int n = dnsData.nameservers.size();
+			String label = n == 0 ? getString(R.string.dns_ns_none)
+					: n == 1 ? getString(R.string.dns_ns_one)
+					: getString(R.string.dns_ns_many, n);
+			LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+					ViewGroup.LayoutParams.WRAP_CONTENT,
+					ViewGroup.LayoutParams.WRAP_CONTENT);
+			alp.leftMargin = dp(8);
+			chips.addView(statusChip(label, Theme.secondaryContainer,
+					Theme.onSecondaryContainer, Theme.secondary), alp);
+		} else if (!wired) {
+			LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+					ViewGroup.LayoutParams.WRAP_CONTENT,
+					ViewGroup.LayoutParams.WRAP_CONTENT);
+			alp.leftMargin = dp(8);
+			chips.addView(statusChip(getString(R.string.dns_not_linked),
+					Theme.surfaceContainerHighest, Theme.text2, Theme.hint), alp);
+		}
+		hero.addView(chips);
+
+		Ui.stagger(top, body, chips);
+	}
+
+	/** Read the tailnet's DNS once per minute, or when forced. */
+	private void maybeLoadDns(boolean force) {
+		if (!CloudApi.connected(this) || dnsLoading) {
+			return;
+		}
+		long now = System.currentTimeMillis();
+		if (!force && dnsData != null && now - dnsData.at < 60_000) {
+			return;
+		}
+		final int epoch = ++dnsEpoch;
+		dnsLoading = true;
+		new Thread(() -> {
+			DnsData next;
+			try {
+				CloudApi.Snapshot s = CloudApi.snapshot(this);
+				next = new DnsData(s.nameservers, s.searchPaths, s.magicDns, null,
+						System.currentTimeMillis());
+			} catch (Exception e) {
+				next = new DnsData(new ArrayList<>(), new ArrayList<>(), false,
+						cloudMessage(e), System.currentTimeMillis());
+			}
+			final DnsData done = next;
+			ui.post(() -> {
+				if (epoch != dnsEpoch) {
+					return;
+				}
+				dnsLoading = false;
+				dnsData = done;
+				dirty[1] = true;
+				if (currentTab == 1 && status != null) {
+					buildDns(status);
+				}
+			});
+		}).start();
+	}
+
+	private static String cloudMessage(Exception e) {
+		String m = e.getMessage();
+		return m == null || m.isEmpty() ? "unknown error" : m;
+	}
+
+	private void dnsErrorCard(String why) {
+		LinearLayout box = new LinearLayout(this);
+		box.setOrientation(LinearLayout.VERTICAL);
+		box.setPadding(dp(18), dp(18), dp(18), dp(16));
+		box.setBackground(Ui.outlined(this,
+				Theme.mix(Theme.surfaceContainer, Theme.errorContainer,
+						Theme.isDark ? 0.34f : 0.26f),
+				Theme.withAlpha(Theme.error, 0x38), 22f, 1f));
+		box.setClipToOutline(true);
+		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		lp.topMargin = dp(18);
+		pDns.addView(box, lp);
+
+		LinearLayout head = new LinearLayout(this);
+		head.setOrientation(LinearLayout.HORIZONTAL);
+		head.setGravity(Gravity.CENTER_VERTICAL);
+		head.addView(Ui.iconTile(this, R.drawable.ic_warn,
+				Theme.withAlpha(Theme.error, 0x1F), Theme.error, 40), tileParams());
+		TextView t = Ui.label(this, getString(R.string.dns_error, why), 13.5f, Theme.text);
+		t.setLineSpacing(dp(3), 1f);
+		head.addView(t, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		box.addView(head);
+
+		LinearLayout acts = new LinearLayout(this);
+		acts.setOrientation(LinearLayout.HORIZONTAL);
+		acts.setPadding(0, dp(14), 0, 0);
+		TextView retry = Ui.tonal(this, getString(R.string.dns_retry));
+		retry.setOnClickListener(v -> {
+			dnsData = null;
+			dirty[1] = true;
+			if (status != null) {
+				buildDns(status);
+			}
+			maybeLoadDns(true);
+		});
+		acts.addView(retry, new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)));
+		box.addView(acts);
+	}
+
+	private void dnsLoadingCard() {
+		LinearLayout g = group(pDns, getString(R.string.dns_nameservers_group));
+		LinearLayout row = row();
+		row.addView(Ui.iconTile(this, R.drawable.ic_globe,
+				Theme.accentDim, Theme.accent, 40), tileParams());
+		TextView t = Ui.label(this, getString(R.string.dns_loading), 14.5f, Theme.text2);
+		row.addView(t);
+		g.addView(row);
+	}
+
+	/** MagicDNS: one switch, written straight to the control plane. */
+	private void dnsMagicCard() {
+		LinearLayout g = group(pDns, getString(R.string.dns_magic_group));
+		// The control plane refuses to keep MagicDNS on with no nameserver to
+		// answer for it. Rather than let the switch fail, say what it needs.
+		boolean ready = !dnsData.nameservers.isEmpty();
+		Ui.Toggle sw = addSwitch(g, R.drawable.ic_shield, getString(R.string.dns_magic_row),
+				getString(ready ? R.string.dns_magic_row_sub
+						: R.string.dns_magic_needs_ns),
+				dnsData.magicDns, ready ? this::writeMagicDns : null);
+		setRowEnabled(sw, ready);
+		switches.put("magicdns", sw);
+	}
+
+	private void dnsNameserverCard() {
+		int n = dnsData.nameservers.size();
+		String trailing = n == 0 ? null : String.valueOf(n);
+		LinearLayout g = group(pDns, getString(R.string.dns_nameservers_group), trailing);
+
+		LinearLayout intro = new LinearLayout(this);
+		intro.setOrientation(LinearLayout.VERTICAL);
+		intro.setPadding(dp(18), dp(14), dp(18), dp(2));
+		TextView sub = Ui.label(this, getString(R.string.dns_nameservers_sub), 12.5f,
+				Theme.text2);
+		sub.setLineSpacing(dp(3), 1f);
+		intro.addView(sub);
+		g.addView(intro);
+
+		if (n == 0) {
+			LinearLayout empty = new LinearLayout(this);
+			empty.setOrientation(LinearLayout.HORIZONTAL);
+			empty.setGravity(Gravity.CENTER_VERTICAL);
+			empty.setPadding(dp(18), dp(10), dp(18), dp(14));
+			empty.addView(Ui.iconTile(this, R.drawable.ic_info,
+					Theme.surfaceContainerHighest, Theme.hint, 34), tileParams());
+			TextView t = Ui.label(this, getString(R.string.dns_nameservers_empty), 12.5f,
+					Theme.hint);
+			t.setLineSpacing(dp(3), 1f);
+			empty.addView(t, new LinearLayout.LayoutParams(0,
+					ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+			g.addView(empty);
+		}
+
+		for (final String server : dnsData.nameservers) {
+			line(g);
+			g.addView(dnsEntryRow(R.drawable.ic_globe, server, providerOf(server),
+					v -> confirmRemoveNameserver(server)));
+		}
+
+		action(g, R.drawable.ic_plus, getString(R.string.dns_add_nameserver),
+				getString(R.string.dns_add_nameserver_sub), v -> showAddNameserver());
+	}
+
+	private void dnsSearchCard() {
+		int n = dnsData.searchPaths.size();
+		LinearLayout g = group(pDns, getString(R.string.dns_search_group),
+				n == 0 ? null : String.valueOf(n));
+
+		LinearLayout intro = new LinearLayout(this);
+		intro.setOrientation(LinearLayout.VERTICAL);
+		intro.setPadding(dp(18), dp(14), dp(18), dp(2));
+		TextView sub = Ui.label(this, getString(R.string.dns_search_sub), 12.5f,
+				Theme.text2);
+		sub.setLineSpacing(dp(3), 1f);
+		intro.addView(sub);
+		g.addView(intro);
+
+		if (n == 0) {
+			TextView empty = Ui.label(this, getString(R.string.dns_search_empty), 12.5f,
+					Theme.hint);
+			empty.setPadding(dp(18), dp(8), dp(18), dp(12));
+			g.addView(empty);
+		}
+
+		for (final String domain : dnsData.searchPaths) {
+			line(g);
+			g.addView(dnsEntryRow(R.drawable.ic_route, domain, null,
+					v -> confirmRemoveSearch(domain)));
+		}
+
+		action(g, R.drawable.ic_plus, getString(R.string.dns_add_search),
+				getString(R.string.dns_add_search_sub), v -> showAddSearch());
+	}
+
+	/** One nameserver or search domain: value, where it comes from, remove. */
+	private View dnsEntryRow(int icon, String value, String sub,
+			View.OnClickListener remove) {
+		LinearLayout row = row();
+		row.addView(Ui.iconTile(this, icon,
+				Theme.accentDim, Theme.accent, 40), tileParams());
+
+		LinearLayout col = col();
+		TextView t = Ui.label(this, value, 14.5f, Theme.text);
+		t.setTypeface(android.graphics.Typeface.MONOSPACE,
+				android.graphics.Typeface.BOLD);
+		t.setSingleLine(true);
+		t.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+		col.addView(t);
+		if (sub != null && !sub.isEmpty()) {
+			TextView s = Ui.label(this, sub, 12f, Theme.text2);
+			s.setPadding(0, dp(3), 0, 0);
+			col.addView(s);
+		}
+		row.addView(col, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+		View del = iconButton(R.drawable.ic_trash, Theme.hint, R.string.dns_remove, remove);
+		LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(40), dp(40));
+		dlp.leftMargin = dp(6);
+		row.addView(del, dlp);
+		return row;
+	}
+
+	private View dnsNameRow(String name) {
+		// A plate inside the device card: the tailnet name is a value to
+		// copy, not a control to toggle.
+		LinearLayout box = new LinearLayout(this);
+		box.setOrientation(LinearLayout.HORIZONTAL);
+		box.setGravity(Gravity.CENTER_VERTICAL);
+		box.setPadding(dp(14), dp(13), dp(10), dp(13));
+		box.setBackground(Ui.inset(this));
+		box.setClipToOutline(true);
+
+		LinearLayout col = col();
+		TextView t = Ui.label(this, getString(R.string.dns_tailnet_name), 13f,
+				Theme.text2);
+		col.addView(t);
+		TextView value = Ui.label(this, name, 16f, Theme.text);
+		value.setTypeface(android.graphics.Typeface.MONOSPACE,
+				android.graphics.Typeface.BOLD);
+		value.setSingleLine(true);
+		value.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+		value.setPadding(0, dp(4), 0, 0);
+		col.addView(value);
+		box.addView(col, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+		View cp = iconButton(R.drawable.ic_copy, Theme.accent, R.string.copy,
+				v -> copy(name));
+		box.addView(cp, new LinearLayout.LayoutParams(dp(40), dp(40)));
+		return box;
+	}
+
+	/** Which provider an address or DoH URL belongs to, when it is obvious. */
+	private String providerOf(String server) {
+		String s = server.toLowerCase(java.util.Locale.ROOT);
+		if (s.contains("nextdns")) {
+			return getString(R.string.dns_provider_nextdns);
+		}
+		if (s.contains("cloudflare") || s.startsWith("1.1.1.1")
+				|| s.startsWith("1.0.0.1")) {
+			return getString(R.string.dns_provider_cloudflare);
+		}
+		if (s.contains("dns.google") || s.startsWith("8.8.8.8")
+				|| s.startsWith("8.8.4.4")) {
+			return getString(R.string.dns_provider_google);
+		}
+		if (s.contains("quad9") || s.startsWith("9.9.9.9")
+				|| s.startsWith("149.112.112.112")) {
+			return getString(R.string.dns_provider_quad9);
+		}
+		if (s.contains("adguard") || s.startsWith("94.140.")) {
+			return getString(R.string.dns_provider_adguard);
+		}
+		return getString(R.string.dns_provider_custom);
+	}
+
+	private void dnsAccountCard() {
+		LinearLayout g = group(pDns, getString(R.string.dns_account_group));
+		LinearLayout row = row();
+		row.addView(Ui.iconTile(this, R.drawable.ic_key,
+				Theme.withAlpha(Theme.success, 0x1F), Theme.success, 40), tileParams());
+
+		LinearLayout col = col();
+		TextView t = Ui.label(this, getString(R.string.dns_connected_as, maskedToken()),
+				14.5f, Theme.text);
+		t.setTypeface(null, android.graphics.Typeface.BOLD);
+		t.setSingleLine(true);
+		col.addView(t);
+		TextView s = Ui.label(this, getString(R.string.dns_connected_named), 12f, Theme.text2);
+		s.setPadding(0, dp(3), 0, 0);
+		col.addView(s);
+		row.addView(col, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		g.addView(row);
+
+		action(g, R.drawable.ic_logout, getString(R.string.dns_disconnect),
+				getString(R.string.dns_disconnect_sub), v -> confirmDisconnect());
+	}
+
+	private String maskedToken() {
+		return CloudApi.masked(this);
+	}
+
+	/** The card that turns a read-only page into a full DNS console. */
+	private void dnsConnectCard() {
+		LinearLayout g = group(pDns, getString(R.string.dns_connect_title));
+
+		LinearLayout head = new LinearLayout(this);
+		head.setOrientation(LinearLayout.HORIZONTAL);
+		head.setPadding(dp(18), dp(16), dp(18), dp(6));
+		head.addView(Ui.iconTile(this, R.drawable.ic_key,
+				Theme.accentDim, Theme.accent, 42), tileParams());
+		LinearLayout hc = col();
+		TextView body = Ui.label(this, getString(R.string.dns_connect_body), 13f,
+				Theme.text2);
+		body.setLineSpacing(dp(4), 1f);
+		hc.addView(body);
+		head.addView(hc, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		g.addView(head);
+
+		g.addView(dnsStep(1, getString(R.string.dns_step_1)));
+		g.addView(dnsStep(2, getString(R.string.dns_step_2)));
+		g.addView(dnsStep(3, getString(R.string.dns_step_3)));
+
+		LinearLayout entry = new LinearLayout(this);
+		entry.setOrientation(LinearLayout.HORIZONTAL);
+		entry.setGravity(Gravity.CENTER_VERTICAL);
+		entry.setPadding(dp(18), dp(16), dp(18), dp(18));
+
+		final EditText in = input(getString(R.string.dns_token_label),
+				getString(R.string.dns_token_hint));
+		in.setTypeface(android.graphics.Typeface.MONOSPACE);
+		in.setTextSize(13.5f);
+		entry.addView(in, new LinearLayout.LayoutParams(0, dp(48), 1f));
+
+		final TextView connect = Ui.button(this, getString(R.string.dns_token_apply), true);
+		connect.setOnClickListener(v -> connectTailnet(in, connect));
+		LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.WRAP_CONTENT, dp(48));
+		blp.leftMargin = dp(10);
+		entry.addView(connect, blp);
+		g.addView(entry);
+
+		action(g, R.drawable.ic_globe, getString(R.string.dns_create_token),
+				getString(R.string.dns_token_link_sub), v -> open(TOKEN_URL));
+	}
+
+	/** A numbered instruction: a disc, then the sentence beside it. */
+	private View dnsStep(int n, String text) {
+		LinearLayout row = new LinearLayout(this);
+		row.setOrientation(LinearLayout.HORIZONTAL);
+		row.setPadding(dp(18), dp(6), dp(18), dp(6));
+
+		TextView num = Ui.label(this, String.valueOf(n), 11.5f, Theme.onSecondaryContainer);
+		num.setTypeface(null, android.graphics.Typeface.BOLD);
+		num.setGravity(Gravity.CENTER);
+		num.setBackground(Ui.rounded(this, Theme.secondaryContainer, 999f));
+		row.addView(num, new LinearLayout.LayoutParams(dp(22), dp(22)));
+
+		TextView t = Ui.label(this, text, 12.5f, Theme.text2);
+		t.setLineSpacing(dp(3), 1f);
+		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+		lp.leftMargin = dp(12);
+		row.addView(t, lp);
+		return row;
+	}
+
+	private EditText input(String hint) {
+		return input("", hint);
+	}
+
+	private EditText input(String label, String hint) {
+		EditText in = new EditText(this);
+		in.setHint(hint);
+		in.setSingleLine(true);
+		in.setTextColor(Theme.text);
+		in.setHintTextColor(Theme.hint);
+		in.setTextSize(14f);
+		in.setGravity(Gravity.CENTER_VERTICAL);
+		in.setPadding(dp(14), 0, dp(14), 0);
+		in.setBackground(Ui.fieldBg(this));
+		in.setContentDescription(label);
+		return in;
+	}
+
+	private void connectTailnet(EditText in, TextView button) {
+		final String token = in.getText().toString().trim();
+		if (token.isEmpty()) {
+			toast(getString(R.string.dns_token_empty));
+			return;
+		}
+		button.setEnabled(false);
+		button.setAlpha(0.5f);
+		button.setText(getString(R.string.checking));
+		new Thread(() -> {
+			// Check before storing. Saving first and failing later leaves a
+			// dead token on disk that makes the page look connected while
+			// every read errors.
+			CloudApi.save(this, token);
+			String why = null;
+			try {
+				CloudApi.verify(this);
+			} catch (Exception e) {
+				why = cloudMessage(e);
+			}
+			final String fail = why;
+			ui.post(() -> {
+				button.setEnabled(true);
+				button.setAlpha(1f);
+				button.setText(getString(R.string.dns_token_apply));
+				if (fail != null) {
+					CloudApi.forget(this);
+					toast(getString(R.string.dns_token_bad, fail));
+					return;
+				}
+				toast(getString(R.string.dns_token_ok));
+				dnsData = null;
+				dirty[1] = true;
+				if (status != null && currentTab == 1) {
+					buildDns(status);
+				}
+				maybeLoadDns(true);
+			});
+		}).start();
+	}
+
+	private void writeMagicDns(boolean on) {
+		new Thread(() -> {
+			try {
+				CloudApi.setMagicDns(this, on);
+				ui.post(() -> {
+					if (dnsData != null) {
+						dnsData = new DnsData(dnsData.nameservers,
+								dnsData.searchPaths, on, null,
+								System.currentTimeMillis());
+					}
+					toast(getString(R.string.dns_saved));
+					refreshDnsPage();
+				});
+			} catch (Exception e) {
+				final String why = cloudMessage(e);
+				ui.post(() -> {
+					toast(getString(R.string.dns_save_failed, why));
+					dnsData = null;
+					refreshDnsPage();
+					maybeLoadDns(true);
+				});
+			}
+		}).start();
+	}
+
+	private void refreshDnsPage() {
+		dirty[1] = true;
+		if (currentTab == 1 && status != null) {
+			buildDns(status);
+		}
+	}
+
+	private void writeNameservers(List<String> values) {
+		final List<String> out = new ArrayList<>(values);
+		new Thread(() -> {
+			try {
+				CloudApi.setNameservers(this, out);
+				ui.post(() -> {
+					toast(getString(R.string.dns_saved));
+					dnsData = null;
+					refreshDnsPage();
+					maybeLoadDns(true);
+				});
+			} catch (Exception e) {
+				final String why = cloudMessage(e);
+				ui.post(() -> toast(getString(R.string.dns_save_failed, why)));
+			}
+		}).start();
+	}
+
+	private void writeSearchPaths(List<String> values) {
+		final List<String> out = new ArrayList<>(values);
+		new Thread(() -> {
+			try {
+				CloudApi.setSearchPaths(this, out);
+				ui.post(() -> {
+					toast(getString(R.string.dns_saved));
+					dnsData = null;
+					refreshDnsPage();
+					maybeLoadDns(true);
+				});
+			} catch (Exception e) {
+				final String why = cloudMessage(e);
+				ui.post(() -> toast(getString(R.string.dns_save_failed, why)));
+			}
+		}).start();
+	}
+
+	private void confirmRemoveNameserver(final String server) {
+		if (dnsData == null) {
+			return;
+		}
+		Sheet.card(this)
+				.title(getString(R.string.dns_remove_ns_title))
+				.message(getString(R.string.dns_remove_ns_body, server))
+				.danger(getString(R.string.dns_remove), () -> {
+					List<String> next = new ArrayList<>(dnsData.nameservers);
+					next.remove(server);
+					writeNameservers(next);
+				})
+				.secondary(getString(android.R.string.cancel))
+				.show();
+	}
+
+	private void confirmRemoveSearch(final String domain) {
+		if (dnsData == null) {
+			return;
+		}
+		Sheet.card(this)
+				.title(getString(R.string.dns_remove_sp_title))
+				.message(getString(R.string.dns_remove_sp_body, domain))
+				.danger(getString(R.string.dns_remove), () -> {
+					List<String> next = new ArrayList<>(dnsData.searchPaths);
+					next.remove(domain);
+					writeSearchPaths(next);
+				})
+				.secondary(getString(android.R.string.cancel))
+				.show();
+	}
+
+	private void confirmDisconnect() {
+		Sheet.card(this)
+				.title(getString(R.string.dns_disconnect_title))
+				.message(getString(R.string.dns_disconnect_body))
+				.danger(getString(R.string.dns_disconnect), () -> {
+					CloudApi.forget(this);
+					// Invalidate any read that is still in flight: it was
+					// made with the token that no longer exists.
+					dnsEpoch++;
+					dnsLoading = false;
+					dnsData = null;
+					toast(getString(R.string.dns_disconnect_done));
+					refreshDnsPage();
+				})
+				.secondary(getString(android.R.string.cancel))
+				.show();
+	}
+
+	/**
+	 * The add sheet: a field, the five providers most people want, and a
+	 * validation that keeps the button honest.
+	 */
+	private void showAddNameserver() {
+		final Sheet s = Sheet.bottom(this)
+				.title(getString(R.string.dns_add_nameserver))
+				.subtitle(getString(R.string.dns_add_nameserver_sub));
+
+		final EditText in = input(getString(R.string.dns_field_ns));
+		LinearLayout fieldWrap = new LinearLayout(this);
+		fieldWrap.setPadding(0, dp(16), 0, 0);
+		fieldWrap.addView(in, new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
+		s.add(fieldWrap);
+
+		TextView presets = Ui.eyebrow(this, getString(R.string.dns_preset_label));
+		presets.setPadding(0, dp(20), 0, 0);
+		s.add(presets);
+
+		HorizontalScrollView hsv = new HorizontalScrollView(this);
+		hsv.setHorizontalScrollBarEnabled(false);
+		hsv.setClipToPadding(false);
+		LinearLayout chips = new LinearLayout(this);
+		chips.setOrientation(LinearLayout.HORIZONTAL);
+		chips.setPadding(0, dp(10), 0, 0);
+		for (int i = 0; i < DNS_PRESET_LABELS.length; i++) {
+			final String value = DNS_PRESET_VALUES[i];
+			TextView chip = Ui.label(this, getString(DNS_PRESET_LABELS[i]),
+					13f, Theme.onSecondaryContainer);
+			chip.setTypeface(null, android.graphics.Typeface.BOLD);
+			chip.setSingleLine(true);
+			chip.setGravity(Gravity.CENTER);
+			chip.setPadding(dp(16), dp(10), dp(16), dp(10));
+			chip.setBackground(Ui.ripple(this,
+					Ui.rounded(this, Theme.secondaryContainer, 999f),
+					Theme.withAlpha(Theme.onSecondaryContainer, 0x33), null));
+			chip.setClickable(true);
+			chip.setFocusable(true);
+			chip.setOnClickListener(v -> {
+				in.setText(value);
+				in.setSelection(value.length());
+			});
+			LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+					ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+			lp.rightMargin = dp(8);
+			chips.addView(chip, lp);
+		}
+		hsv.addView(chips);
+		s.add(hsv);
+
+		final TextView err = Ui.label(this, "", 12f, Theme.error);
+		err.setVisibility(View.GONE);
+		err.setPadding(0, dp(12), 0, 0);
+		s.add(err);
+
+		s.primaryKeep(getString(R.string.dns_add), () -> {
+			List<String> add = parseServers(in.getText().toString());
+			if (add.isEmpty()) {
+				err.setText(getString(R.string.dns_invalid_ns));
+				err.setVisibility(View.VISIBLE);
+				Ui.pop(in);
+				return;
+			}
+			s.dismiss();
+			List<String> next = new ArrayList<>(dnsData == null
+					? new ArrayList<>() : dnsData.nameservers);
+			for (String a : add) {
+				boolean dup = false;
+				for (String e : next) {
+					if (e.equalsIgnoreCase(a)) {
+						dup = true;
+						break;
+					}
+				}
+				if (!dup) {
+					next.add(a);
+				}
+			}
+			writeNameservers(next);
+		});
+		s.secondary(getString(android.R.string.cancel));
+		s.show();
+	}
+
+	private void showAddSearch() {
+		final Sheet s = Sheet.bottom(this)
+				.title(getString(R.string.dns_add_search))
+				.subtitle(getString(R.string.dns_add_search_sub));
+
+		final EditText in = input(getString(R.string.dns_field_search));
+		LinearLayout fieldWrap = new LinearLayout(this);
+		fieldWrap.setPadding(0, dp(16), 0, 0);
+		fieldWrap.addView(in, new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
+		s.add(fieldWrap);
+
+		final TextView err = Ui.label(this, "", 12f, Theme.error);
+		err.setVisibility(View.GONE);
+		err.setPadding(0, dp(12), 0, 0);
+		s.add(err);
+
+		s.primaryKeep(getString(R.string.dns_add), () -> {
+			String d = in.getText().toString().trim().toLowerCase(java.util.Locale.ROOT);
+			while (d.startsWith(".")) {
+				d = d.substring(1);
+			}
+			if (!validDomain(d)) {
+				err.setText(getString(R.string.dns_invalid_domain));
+				err.setVisibility(View.VISIBLE);
+				Ui.pop(in);
+				return;
+			}
+			s.dismiss();
+			List<String> next = new ArrayList<>(dnsData == null
+					? new ArrayList<>() : dnsData.searchPaths);
+			for (String e : next) {
+				if (e.equalsIgnoreCase(d)) {
+					err.setText(getString(R.string.dns_dup));
+					err.setVisibility(View.VISIBLE);
+					return;
+				}
+			}
+			next.add(d);
+			writeSearchPaths(next);
+		});
+		s.secondary(getString(android.R.string.cancel));
+		s.show();
+	}
+
+	/** Split "1.1.1.1, 1.0.0.1" into entries; reject anything unpasteable. */
+	private List<String> parseServers(String raw) {
+		List<String> out = new ArrayList<>();
+		for (String part : raw.split("[,\\s]+")) {
+			String v = part.trim();
+			if (v.isEmpty()) {
+				continue;
+			}
+			// A DoH URL pasted from a provider page often ends in a slash.
+			// The control plane accepts either, so normalise instead of
+			// refusing what the user just copied.
+			while (v.length() > 1 && v.endsWith("/")) {
+				v = v.substring(0, v.length() - 1);
+			}
+			if (!validServer(v)) {
+				return new ArrayList<>();
+			}
+			out.add(v);
+		}
+		return out;
+	}
+
+	private static boolean validServer(String v) {
+		if (v.length() > 255 || v.endsWith("/")) {
+			return false;
+		}
+		// IP literal, hostname, or a DoH URL. The control plane does the real
+		// validation; this only catches the field being filled with prose.
+		return v.matches("^[A-Za-z0-9](?:[A-Za-z0-9._:/-]*[A-Za-z0-9])?$")
+				&& v.contains(".");
+	}
+
+	private static boolean validDomain(String d) {
+		return d.length() > 1 && d.length() < 254
+				&& d.matches("^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$");
 	}
 
 	private void buildSystem(JSONObject st) {
@@ -1975,20 +3207,24 @@ public class MainActivity extends Activity {
 		// be repeated on the Send screen as well, which put two Start/Stop
 		// switches in front of the one thing Send is for.
 		LinearLayout d = group(pSystem, getString(R.string.daemon));
-		addSwitch(d, getString(R.string.service), getString(R.string.service_sub),
-				daemonUp(st), on -> service(on ? "start" : "stop"));
-		action(d, getString(R.string.restart), null, v -> service("restart"));
-		View supRow = action(d, getString(R.string.supervisor),
+		addSwitch(d, R.drawable.ic_power, getString(R.string.service),
+				getString(R.string.service_sub), daemonUp(st),
+				on -> service(on ? "start" : "stop"));
+		action(d, R.drawable.ic_refresh, getString(R.string.restart), null,
+				v -> service("restart"));
+		View supRow = action(d, R.drawable.ic_heart, getString(R.string.supervisor),
 				supervisorUp(st) ? getString(R.string.supervisor_running)
 						: getString(R.string.supervisor_stopped), null);
 		supervisorSub = supRow.findViewById(R.id.rowSub);
-		action(d, getString(R.string.console), null, v -> open(CONSOLE_URL));
+		action(d, R.drawable.ic_globe, getString(R.string.console), null,
+				v -> open(CONSOLE_URL));
 
 		LinearLayout c = group(pSystem, getString(R.string.this_device));
-		value(c, getString(R.string.backend), st.optString("backend", "?"));
+		value(c, R.drawable.ic_chip, getString(R.string.backend),
+				st.optString("backend", "?"));
 		JSONObject self = st.optJSONObject("self");
 		if (self != null) {
-			TextView nv = value(c, getString(R.string.device_name),
+			TextView nv = value(c, R.drawable.ic_device, getString(R.string.device_name),
 					self.optString("host", "\u2014"));
 			nameValues.add(nv);
 			nameShown.add(self.optString("host", "\u2014"));
@@ -1996,12 +3232,12 @@ public class MainActivity extends Activity {
 			if (ips != null) {
 				for (int i = 0; i < ips.length(); i++) {
 					final String ip = ips.optString(i);
-					copyRow(c, i == 0 ? getString(R.string.ipv4)
+					copyRow(c, R.drawable.ic_globe, i == 0 ? getString(R.string.ipv4)
 							: getString(R.string.ipv6), ip);
 				}
 			}
 			String relay = self.optString("relay", "");
-			value(c, getString(R.string.relay),
+			value(c, R.drawable.ic_route, getString(R.string.relay),
 					relay.isEmpty() ? getString(R.string.direct) : relay);
 		}
 		JSONObject tn = st.optJSONObject("tailnet");
@@ -2018,7 +3254,7 @@ public class MainActivity extends Activity {
 					receivedCount = n;
 					if (n > 0) {
 						ui.post(() -> {
-							dirty[2] = true;
+							dirty[3] = true;
 							buildVisible();
 						});
 					}
@@ -2031,49 +3267,187 @@ public class MainActivity extends Activity {
 		}
 
 		LinearLayout a1 = group(pSystem, getString(R.string.account));
-		value(a1, getString(R.string.tailnet), account.isEmpty()
+		value(a1, R.drawable.ic_person, getString(R.string.tailnet), account.isEmpty()
 				? getString(R.string.not_signed_in) : account);
 		if (account.isEmpty()) {
-			action(a1, getString(R.string.sign_in), null, v -> doLogin());
+			action(a1, R.drawable.ic_logout, getString(R.string.sign_in), null,
+					v -> doLogin());
 		} else {
-			action(a1, getString(R.string.sign_out), null, v -> confirmSignOut());
+			action(a1, R.drawable.ic_logout, getString(R.string.sign_out), null,
+					v -> confirmSignOut());
 		}
 
 		LinearLayout u = group(pSystem, getString(R.string.software));
-		value(u, getString(R.string.tailscaled_version), st.optString("version", "?"));
-		value(u, getString(R.string.module_version), st.optString("module", "?"));
+		value(u, R.drawable.ic_terminal, getString(R.string.tailscaled_version),
+				st.optString("version", "?"));
+		value(u, R.drawable.ic_settings, getString(R.string.module_version),
+				st.optString("module", "?"));
 
-		updateRow = action(u, getString(R.string.check_updates),
+		updateRow = action(u, R.drawable.ic_download, getString(R.string.check_updates),
 				getString(R.string.update_check_hint), v -> updateNow());
 		updateTitle = updateRow.findViewById(R.id.rowTitle);
 		updateSub = updateRow.findViewById(R.id.rowSub);
 		paintUpdateRow();
 
 		if (receivedCount > 0) {
-			action(u, getString(R.string.received_files_row, receivedCount),
-					getString(R.string.taildrop_folder_sub), v -> openTaildropFolder());
+			action(u, R.drawable.ic_folder, getString(R.string.received_files_row,
+					receivedCount), getString(R.string.taildrop_folder_sub),
+					v -> openTaildropFolder());
 		} else {
-			value(u, getString(R.string.received_files_row_none),
+			value(u, R.drawable.ic_folder, getString(R.string.received_files_row_none),
 					getString(R.string.taildrop_folder_sub));
 		}
-		action(u, getString(R.string.rollback), null, v -> rollback());
-		action(u, getString(R.string.logs), null, v -> showLogs());
+		action(u, R.drawable.ic_history, getString(R.string.rollback), null, v -> rollback());
+		action(u, R.drawable.ic_list, getString(R.string.logs), null, v -> showLogs());
 
-		LinearLayout w = group(pSystem, getString(R.string.wireless_adb_group));
-		addSwitch(w, getString(R.string.wireless_adb_switch),
-				getString(R.string.wireless_adb_sub), adbWireless,
-				on -> confirmWirelessAdb(on));
-		if (adbWireless) {
-			String ip = tsIpv4(st);
-			if (!ip.isEmpty()) {
-				value(w, getString(R.string.wireless_adb_address), ip + ":5555");
-			}
-		}
-		note(w, getString(R.string.wireless_adb_warning));
+		buildWirelessAdb(st);
 
 		LinearLayout a = group(pSystem, getString(R.string.about));
-		action(a, getString(R.string.github_link), null, v -> open(GITHUB_URL));
+		action(a, R.drawable.ic_globe, getString(R.string.github_link), null,
+				v -> open(GITHUB_URL));
 		note(pSystem, getString(R.string.credits_body));
+	}
+
+	/**
+	 * Wireless debugging, with the warning treated like one.
+	 *
+	 * <p>The old version ended the card in a single small grey paragraph,
+	 * which is exactly what a warning should never be: the least visible
+	 * text on the page describing the most dangerous switch on it. Now the
+	 * port, the command and the risk are three full-size blocks.
+	 */
+	private void buildWirelessAdb(JSONObject st) {
+		LinearLayout w = group(pSystem, getString(R.string.wireless_adb_group));
+		addSwitch(w, R.drawable.ic_wifi, getString(R.string.wireless_adb_switch),
+				getString(R.string.wireless_adb_sub), adbWireless,
+				on -> confirmWirelessAdb(on));
+
+		String ip = tsIpv4(st);
+		if (adbWireless && !ip.isEmpty()) {
+			w.addView(adbPanel(ip), insetBlockParams());
+		} else if (!adbWireless) {
+			w.addView(adbOffNote(), insetBlockParams());
+		}
+	}
+
+	private LinearLayout.LayoutParams insetBlockParams() {
+		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		lp.leftMargin = dp(18);
+		lp.rightMargin = dp(18);
+		lp.bottomMargin = dp(18);
+		return lp;
+	}
+
+	private View adbOffNote() {
+		LinearLayout box = new LinearLayout(this);
+		box.setOrientation(LinearLayout.HORIZONTAL);
+		box.setGravity(Gravity.CENTER_VERTICAL);
+		box.setPadding(dp(16), dp(15), dp(16), dp(15));
+		box.setBackground(Ui.outlined(this, Theme.surfaceContainerHigh,
+				Theme.hairline, 18f, 1f));
+		box.setClipToOutline(true);
+
+		box.addView(Ui.iconTile(this, R.drawable.ic_shield,
+				Theme.withAlpha(Theme.success, 0x1F), Theme.success, 40), tileParams());
+
+		LinearLayout col = col();
+		TextView t = Ui.label(this, getString(R.string.adb_off_title), 14.5f, Theme.text);
+		t.setTypeface(null, android.graphics.Typeface.BOLD);
+		col.addView(t);
+		TextView b = Ui.label(this, getString(R.string.adb_off_body), 12.5f, Theme.text2);
+		b.setLineSpacing(dp(3), 1f);
+		b.setPadding(0, dp(3), 0, 0);
+		col.addView(b);
+		box.addView(col, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		return box;
+	}
+
+	private View adbPanel(String ip) {
+		final String address = ip + ":5555";
+		final String command = "adb connect " + address;
+
+		LinearLayout box = new LinearLayout(this);
+		box.setOrientation(LinearLayout.VERTICAL);
+		box.setPadding(dp(16), dp(16), dp(16), dp(16));
+		box.setBackground(Ui.outlined(this,
+				Theme.mix(Theme.surfaceContainerHigh, Theme.errorContainer,
+						Theme.isDark ? 0.30f : 0.22f),
+				Theme.withAlpha(Theme.error, 0x40), 18f, 1f));
+		box.setClipToOutline(true);
+
+		LinearLayout head = new LinearLayout(this);
+		head.setOrientation(LinearLayout.HORIZONTAL);
+		head.setGravity(Gravity.CENTER_VERTICAL);
+		head.addView(Ui.iconTile(this, R.drawable.ic_warn,
+				Theme.withAlpha(Theme.error, 0x1F), Theme.error, 42), tileParams());
+
+		LinearLayout hc = col();
+		TextView t = Ui.label(this, getString(R.string.adb_risk_title), 15.5f, Theme.error);
+		t.setTypeface(null, android.graphics.Typeface.BOLD);
+		hc.addView(t);
+		TextView b = Ui.label(this, getString(R.string.adb_risk_body), 13f, Theme.text2);
+		b.setLineSpacing(dp(4), 1f);
+		b.setPadding(0, dp(4), 0, 0);
+		hc.addView(b);
+		head.addView(hc, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		box.addView(head);
+
+		// The address and the exact command: what you need, at a size you
+		// can read while holding the phone at arm's length.
+		box.addView(Ui.eyebrow(this, getString(R.string.adb_address_eyebrow)),
+				blockGap(16));
+
+		LinearLayout addrRow = new LinearLayout(this);
+		addrRow.setOrientation(LinearLayout.HORIZONTAL);
+		addrRow.setGravity(Gravity.CENTER_VERTICAL);
+		addrRow.setPadding(dp(14), dp(10), dp(8), dp(10));
+		addrRow.setBackground(Ui.fieldBg(this));
+
+		TextView addr = Ui.label(this, address, 17f, Theme.text);
+		addr.setTypeface(android.graphics.Typeface.MONOSPACE,
+				android.graphics.Typeface.BOLD);
+		addr.setLetterSpacing(0.01f);
+		addrRow.addView(addr, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+		View copyAddr = iconButton(R.drawable.ic_copy, Theme.accent,
+				R.string.wireless_adb_copy, v -> copy(address));
+		addrRow.addView(copyAddr, new LinearLayout.LayoutParams(dp(40), dp(40)));
+		box.addView(addrRow, blockGap(6));
+
+		LinearLayout cmdRow = new LinearLayout(this);
+		cmdRow.setOrientation(LinearLayout.HORIZONTAL);
+		cmdRow.setGravity(Gravity.CENTER_VERTICAL);
+		cmdRow.setPadding(dp(14), dp(10), dp(8), dp(10));
+		cmdRow.setBackground(Ui.fieldBg(this));
+
+		TextView cmd = Ui.label(this, command, 12.5f, Theme.text2);
+		cmd.setTypeface(android.graphics.Typeface.MONOSPACE, 0);
+		cmd.setSingleLine(true);
+		cmd.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+		cmdRow.addView(cmd, new LinearLayout.LayoutParams(0,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+		View copyCmd = iconButton(R.drawable.ic_copy, Theme.text2,
+				R.string.wireless_adb_copy_command, v -> copy(command));
+		cmdRow.addView(copyCmd, new LinearLayout.LayoutParams(dp(40), dp(40)));
+		box.addView(cmdRow, blockGap(8));
+
+		TextView done = Ui.label(this, getString(R.string.adb_turn_off_hint),
+				12f, Theme.hint);
+		done.setPadding(0, dp(10), 0, 0);
+		box.addView(done);
+		return box;
+	}
+
+	private LinearLayout.LayoutParams blockGap(int topDp) {
+		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		lp.topMargin = dp(topDp);
+		return lp;
 	}
 
 	private void paintUpdateRow() {
@@ -2242,15 +3616,17 @@ public class MainActivity extends Activity {
 	}
 
 	private TextView chip(CharSequence label) {
-		TextView b = Ui.label(this, label, 12.5f, Theme.onSecondaryContainer);
+		TextView b = Ui.label(this, label, 13f, Theme.onSecondaryContainer);
 		b.setTypeface(null, android.graphics.Typeface.BOLD);
 		b.setGravity(Gravity.CENTER);
-		b.setPadding(dp(14), dp(9), dp(14), dp(9));
+		b.setMinHeight(dp(38));
+		b.setPadding(dp(16), dp(9), dp(16), dp(9));
 		b.setBackground(Ui.ripple(this,
 				Ui.rounded(this, Theme.secondaryContainer, 999f),
 				Theme.withAlpha(Theme.onSecondaryContainer, 0x33), null));
 		b.setClickable(true);
 		b.setFocusable(true);
+		Ui.pressable(b);
 		return b;
 	}
 
@@ -2470,18 +3846,31 @@ public class MainActivity extends Activity {
 	}
 
 	private LinearLayout group(LinearLayout parent, String heading) {
+		return group(parent, heading, null);
+	}
+
+	private LinearLayout group(LinearLayout parent, String heading, String trailing) {
 		if (heading != null) {
-			parent.addView(Ui.section(this, heading));
+			LinearLayout head = Ui.section(this, heading);
+			if (trailing != null && !trailing.isEmpty()) {
+				View gap = new View(this);
+				head.addView(gap, new LinearLayout.LayoutParams(0, 1, 1f));
+				TextView tail = Ui.label(this, trailing, 12f, Theme.text2);
+				tail.setTypeface(null, android.graphics.Typeface.BOLD);
+				head.addView(tail);
+			}
+			parent.addView(head);
 		} else {
 			LinearLayout.LayoutParams s = new LinearLayout.LayoutParams(
 					ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-			s.topMargin = dp(16);
+			s.topMargin = dp(18);
 			parent.addView(new View(this), s);
 		}
 
 		LinearLayout g = new LinearLayout(this);
 		g.setOrientation(LinearLayout.VERTICAL);
 		g.setBackground(Ui.cardBg(this));
+		g.setClipToOutline(true);
 		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
 				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		parent.addView(g, lp);
@@ -2496,20 +3885,31 @@ public class MainActivity extends Activity {
 		v.setBackgroundColor(Theme.hairline);
 		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
 				ViewGroup.LayoutParams.MATCH_PARENT, 1);
-		lp.leftMargin = dp(16);
-		lp.rightMargin = dp(16);
+		lp.leftMargin = dp(18);
+		lp.rightMargin = dp(18);
 		g.addView(v, lp);
 	}
 
 	private TextView value(LinearLayout g, String label, String v) {
+		return value(g, 0, label, v);
+	}
+
+	private TextView value(LinearLayout g, int icon, String label, String v) {
 		line(g);
 		LinearLayout row = row();
+
+		if (icon != 0) {
+			row.addView(Ui.iconTile(this, icon, Theme.accentDim, Theme.accent, 40),
+					tileParams());
+		}
+
 		TextView l = Ui.label(this, label, 15f, Theme.text);
 		l.setSingleLine(true);
 		row.addView(l, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-		TextView val = Ui.label(this, v, 14f, Theme.text2);
+		TextView val = Ui.label(this, v, 13.5f, Theme.text2);
 		val.setMaxLines(2);
+		val.setGravity(Gravity.END);
 		val.setEllipsize(android.text.TextUtils.TruncateAt.END);
 		LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(
 				ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -2520,17 +3920,27 @@ public class MainActivity extends Activity {
 	}
 
 	private void copyRow(LinearLayout g, String label, String v) {
+		copyRow(g, 0, label, v);
+	}
+
+	private void copyRow(LinearLayout g, int icon, String label, String v) {
 		line(g);
 		LinearLayout row = row();
-		row.setBackground(Ui.press(this));
+		row.setBackground(Ui.press(this, 18f));
 		row.setClickable(true);
 		row.setOnClickListener(x -> copy(v));
+		Ui.pressable(row);
+
+		if (icon != 0) {
+			row.addView(Ui.iconTile(this, icon, Theme.accentDim, Theme.accent, 40),
+					tileParams());
+		}
 
 		TextView l = Ui.label(this, label, 15f, Theme.text);
 		l.setSingleLine(true);
 		row.addView(l, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-		TextView val = Ui.label(this, v, 14f, Theme.text2);
+		TextView val = Ui.label(this, v, 13.5f, Theme.text2);
 		val.setSingleLine(true);
 		val.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
 		row.addView(val);
@@ -2538,19 +3948,30 @@ public class MainActivity extends Activity {
 		ImageView cp = new ImageView(this);
 		cp.setImageResource(R.drawable.ic_copy);
 		cp.setColorFilter(Theme.hint);
-		LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(15), dp(15));
+		LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(16), dp(16));
 		clp.leftMargin = dp(12);
 		row.addView(cp, clp);
 		g.addView(row);
 	}
 
 	private View action(LinearLayout g, String title, String sub, View.OnClickListener l) {
+		return action(g, 0, title, sub, l);
+	}
+
+	private View action(LinearLayout g, int icon, String title, String sub,
+			View.OnClickListener l) {
 		line(g);
 		LinearLayout row = row();
 
+		if (icon != 0) {
+			row.addView(Ui.iconTile(this, icon, Theme.accentDim, Theme.accent, 40),
+					tileParams());
+		}
+
 		LinearLayout col = col();
-		TextView t = Ui.label(this, title, 15f, Theme.text);
+		TextView t = Ui.label(this, title, 15.5f, Theme.text);
 		t.setId(R.id.rowTitle);
+		t.setTypeface(null, android.graphics.Typeface.BOLD);
 		t.setSingleLine(true);
 		t.setEllipsize(android.text.TextUtils.TruncateAt.END);
 		col.addView(t);
@@ -2559,6 +3980,8 @@ public class MainActivity extends Activity {
 			TextView s = Ui.label(this, sub, 12.5f, Theme.text2);
 			s.setId(R.id.rowSub);
 			s.setPadding(0, dp(3), 0, 0);
+			s.setMaxLines(2);
+			s.setLineSpacing(dp(2), 1f);
 			col.addView(s);
 		}
 
@@ -2568,12 +3991,13 @@ public class MainActivity extends Activity {
 			ImageView chev = new ImageView(this);
 			chev.setImageResource(R.drawable.ic_chevron);
 			chev.setColorFilter(Theme.hint);
-			LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(16), dp(16));
+			LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(17), dp(17));
 			clp.leftMargin = dp(10);
 			row.addView(chev, clp);
-			row.setBackground(Ui.press(this));
+			row.setBackground(Ui.press(this, 18f));
 			row.setClickable(true);
 			row.setOnClickListener(l);
+			Ui.pressable(row);
 		}
 		g.addView(row);
 		return row;
@@ -2581,18 +4005,32 @@ public class MainActivity extends Activity {
 
 	private Ui.Toggle addSwitch(LinearLayout g, String title, String sub, boolean on,
 			OnChecked l) {
+		return addSwitch(g, 0, title, sub, on, l);
+	}
+
+	private Ui.Toggle addSwitch(LinearLayout g, int icon, String title, String sub, boolean on,
+			OnChecked l) {
 		line(g);
 		LinearLayout row = row();
+
+		if (icon != 0) {
+			row.addView(Ui.iconTile(this, icon, Theme.accentDim, Theme.accent, 40),
+					tileParams());
+		}
+
 		LinearLayout col = col();
 
-		TextView t = Ui.label(this, title, 15f, Theme.text);
+		TextView t = Ui.label(this, title, 15.5f, Theme.text);
 		t.setId(R.id.rowTitle);
+		t.setTypeface(null, android.graphics.Typeface.BOLD);
 		col.addView(t);
 
 		if (sub != null && !sub.isEmpty()) {
 			TextView s = Ui.label(this, sub, 12.5f, Theme.text2);
 			s.setId(R.id.rowSub);
 			s.setPadding(0, dp(3), 0, 0);
+			s.setMaxLines(3);
+			s.setLineSpacing(dp(2), 1f);
 			col.addView(s);
 		}
 		row.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -2602,7 +4040,7 @@ public class MainActivity extends Activity {
 
 		if (l != null) {
 			sw.setOnCheckedChangeListener(l::on);
-			row.setBackground(Ui.press(this));
+			row.setBackground(Ui.press(this, 18f));
 			row.setClickable(true);
 			// The whole row is a bigger target, but a disabled switch must stay
 			// disabled: performClick() does not check enabled itself.
@@ -2611,9 +4049,16 @@ public class MainActivity extends Activity {
 					sw.performClick();
 				}
 			});
+			Ui.pressable(row);
 		}
 		g.addView(row);
 		return sw;
+	}
+
+	private LinearLayout.LayoutParams tileParams() {
+		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(40), dp(40));
+		lp.rightMargin = dp(14);
+		return lp;
 	}
 
 	private void plain(LinearLayout g, String text) {
@@ -2626,7 +4071,8 @@ public class MainActivity extends Activity {
 		LinearLayout row = new LinearLayout(this);
 		row.setOrientation(LinearLayout.HORIZONTAL);
 		row.setGravity(Gravity.CENTER_VERTICAL);
-		row.setPadding(dp(16), dp(14), dp(16), dp(14));
+		row.setPadding(dp(18), dp(15), dp(18), dp(15));
+		row.setMinimumHeight(dp(68));
 		return row;
 	}
 
@@ -2641,9 +4087,9 @@ public class MainActivity extends Activity {
 	}
 
 	private void note(LinearLayout parent, String text) {
-		TextView t = Ui.label(this, text, 12.5f, Theme.hint);
+		TextView t = Ui.label(this, text, 13f, Theme.hint);
 		t.setLineSpacing(dp(4), 1f);
-		t.setPadding(dp(4), dp(14), dp(4), 0);
+		t.setPadding(dp(6), dp(16), dp(6), 0);
 		parent.addView(t);
 	}
 

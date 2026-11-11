@@ -1,3 +1,41 @@
+## v1.0.37  2026-11-11
+
+- **A DNS tab, with the admin console's DNS page inside it.** Global
+  nameservers, search domains and MagicDNS are tailnet state, not daemon state,
+  so the CLI cannot touch them — which is exactly why they used to mean opening
+  a browser. They are now edited in place: tap a provider (Cloudflare, Google,
+  Quad9, AdGuard, NextDNS) or paste any address, hostname or DNS-over-HTTPS URL;
+  remove one with a confirmation that names what stops answering; add search
+  domains the same way. One Tailscale API access token unlocks it, created in
+  the console and pasted once. The token lives in the app's private storage, is
+  shown only as `tskey-api…abcd`, can be removed with one tap, and every call
+  reports what actually failed — a revoked token, a token without DNS scope,
+  or an unreachable API.
+- **The tab is useful before the token exists.** The tailnet's DNS name, whether
+  MagicDNS is on (read from the daemon's own status), and this phone's "use
+  tailnet DNS" switch all work without an account, so the page never opens on a
+  login wall.
+- **MagicDNS tells the truth about its dependency.** Tailscale refuses to keep
+  MagicDNS on with no nameserver behind it, so the switch is dimmed with that
+  sentence instead of accepting a write that will not stick.
+- **Outfit, bundled and licensed.** Five weights ship inside the APK (~92 KB)
+  and are wired through the theme, so display type is the same offline, in light
+  and dark. `textStyle="bold"` now resolves to a real 700 cut rather than a
+  synthesised one. OFL text is in `share-app/OFL-Outfit.txt` and the notices.
+- **Subnet router controls, not just routes.** Advertised ranges are editable in
+  place (validated as CIDR, normalised on save), source NAT for those ranges has
+  a switch of its own and is dimmed while nothing is advertised, and the web
+  client can be turned on from Settings.
+- **Every switch writes and reports.** Preference writes now rebuild whichever
+  tab is on screen rather than only Settings, so `accept DNS` changed from the
+  DNS tab updates both, and a failed write restores the state the daemon
+  confirmed instead of leaving a row lying about it.
+- **Smaller fixes.** The header, nav and heroes now use the bundled family;
+  the DNS tab joins the floating nav as a fourth item; pull-to-refresh also
+  re-reads the DNS document instead of serving the one-minute cache; and the
+  README no longer claims the app has no network access, because it now has one
+  deliberate, opt-in connection.
+
 ## v1.0.36
 
 - 7b0d54b Material You interface, rebuilt from the colour up
