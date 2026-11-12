@@ -281,7 +281,9 @@ final class Ui {
 		b.setBackground(primaryButton(c, enabled));
 		b.setClickable(true);
 		b.setFocusable(true);
-		b.setPadding(dp(c, 22), dp(c, 17), dp(c, 22), dp(c, 17));
+		b.setPadding(dp(c, 20), dp(c, 15), dp(c, 20), dp(c, 15));
+		b.setMinHeight(dp(c, 54));
+		b.setGravity(Gravity.CENTER);
 		b.setEnabled(enabled);
 		return b;
 	}

@@ -1,16 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The touch feedback on a navigation item.
 
-     It is the shape of the mark behind the icon, not a rectangle. The
-     default selectableItemBackground is a rectangle the size of the whole
-     item, so pressing one put a square shadow across the bar — which read
-     as a bug rather than as a touch. -->
+     It is the shape of the mark behind the icon, not a rectangle: the item
+     covers the icon and its label, the mark covers the icon alone. -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
 	android:color="#33FFFFFF">
 	<item android:id="@android:id/mask">
 		<shape android:shape="rectangle">
+			<corners android:radius="999dp" />
 			<solid android:color="#FFFFFFFF" />
-			<corners android:radius="15dp" />
 		</shape>
 	</item>
 </ripple>

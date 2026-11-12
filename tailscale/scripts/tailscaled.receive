@@ -134,6 +134,11 @@ copy_out() {
 		target="${DEST}/${stem}-${n}${ext}"
 	fi
 	mv -f "$1" "$target" 2>/dev/null || return 1
+	# The module runs under umask 077, and a delivery can arrive root-only.
+	# A file the user cannot open from a file manager looks lost even though
+	# it is exactly where the notification says. Best effort: emulated
+	# storage may synthesise permissions and ignore this.
+	chmod 0664 "$target" 2>/dev/null || true
 	log_line "exported ${target}"
 	echo "$target"
 }

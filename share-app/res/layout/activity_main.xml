@@ -190,20 +190,22 @@
 
 	</FrameLayout>
 
-	<!-- ── navigation: the Material 3 bottom bar ────────────────
-	     A bar that runs edge to edge on a black page used to read as just a
-	     slightly lighter band, so it was floated with margins. Material 3
-	     solves the same problem differently: a full-width surface container
-	     separated by a hairline, with a 64x32dp indicator behind the current
-	     item. The indicator is the thing that moves, not the whole bar. -->
-	<LinearLayout
+	<!-- ── navigation ────────────────────────────────────────────
+	     One mark, not four. Each item used to carry its own hidden pill,
+	     which meant the selection could only ever appear under the icon
+	     being tapped. A single indicator that travels between items is what
+	     makes the bar feel like one control: the eye follows the mark, and
+	     the destination lights up as it arrives.
+
+	     The indicator is a sibling of the item row rather than a child of an
+	     item, so it can be placed at any fraction of the bar's width. -->
+	<FrameLayout
 		android:id="@+id/navBar"
 		android:layout_width="match_parent"
 		android:layout_height="wrap_content"
 		android:layout_marginStart="14dp"
 		android:layout_marginEnd="14dp"
 		android:layout_marginBottom="10dp"
-		android:orientation="horizontal"
 		android:background="@drawable/nav_bar"
 		android:elevation="3dp"
 		android:paddingTop="7dp"
@@ -211,127 +213,98 @@
 		android:paddingStart="8dp"
 		android:paddingEnd="8dp">
 
-		<LinearLayout
-			android:id="@+id/navSend"
-			style="@style/Nav">
-
-			<FrameLayout
-				style="@style/NavPill"
-				android:background="@drawable/nav_pill_ripple"
-				android:clickable="false"
-				android:focusable="false">
-
-				<View
-					android:id="@+id/navPill"
-					android:layout_width="match_parent"
-					android:layout_height="match_parent"
-					android:background="@drawable/nav_pill"
-					android:visibility="invisible" />
-
-				<ImageView
-					android:id="@+id/navIcon"
-					style="@style/NavIcon"
-					android:layout_gravity="center"
-					android:src="@drawable/ic_send" />
-			</FrameLayout>
-
-			<TextView
-				android:id="@+id/navLabel"
-				style="@style/NavLabel"
-				android:text="@string/nav_send" />
-		</LinearLayout>
-
+		<View
+			android:id="@+id/navIndicator"
+			android:layout_width="64dp"
+			android:layout_height="32dp"
+			android:layout_gravity="top|start"
+			android:layout_marginTop="8dp"
+			android:visibility="invisible" />
 
 		<LinearLayout
-			android:id="@+id/navDns"
-			style="@style/Nav">
+			android:id="@+id/navItems"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:orientation="horizontal">
 
-			<FrameLayout
-				style="@style/NavPill"
-				android:background="@drawable/nav_pill_ripple"
-				android:clickable="false"
-				android:focusable="false">
+			<LinearLayout
+				android:id="@+id/navSend"
+				style="@style/Nav">
 
-				<View
-					android:id="@+id/navPill"
-					android:layout_width="match_parent"
-					android:layout_height="match_parent"
-					android:background="@drawable/nav_pill"
-					android:visibility="invisible" />
+				<FrameLayout style="@style/NavPill">
 
-				<ImageView
-					android:id="@+id/navIcon"
-					style="@style/NavIcon"
-					android:layout_gravity="center"
-					android:src="@drawable/ic_globe" />
-			</FrameLayout>
+					<ImageView
+						android:id="@+id/navIcon"
+						style="@style/NavIcon"
+						android:layout_gravity="center"
+						android:src="@drawable/ic_send" />
+				</FrameLayout>
 
-			<TextView
-				android:id="@+id/navLabel"
-				style="@style/NavLabel"
-				android:text="@string/nav_dns" />
+				<TextView
+					android:id="@+id/navLabel"
+					style="@style/NavLabel"
+					android:text="@string/nav_send" />
+			</LinearLayout>
+
+
+			<LinearLayout
+				android:id="@+id/navDns"
+				style="@style/Nav">
+
+				<FrameLayout style="@style/NavPill">
+
+					<ImageView
+						android:id="@+id/navIcon"
+						style="@style/NavIcon"
+						android:layout_gravity="center"
+						android:src="@drawable/ic_globe" />
+				</FrameLayout>
+
+				<TextView
+					android:id="@+id/navLabel"
+					style="@style/NavLabel"
+					android:text="@string/nav_dns" />
+			</LinearLayout>
+
+
+			<LinearLayout
+				android:id="@+id/navSettings"
+				style="@style/Nav">
+
+				<FrameLayout style="@style/NavPill">
+
+					<ImageView
+						android:id="@+id/navIcon"
+						style="@style/NavIcon"
+						android:layout_gravity="center"
+						android:src="@drawable/ic_settings" />
+				</FrameLayout>
+
+				<TextView
+					android:id="@+id/navLabel"
+					style="@style/NavLabel"
+					android:text="@string/nav_settings" />
+			</LinearLayout>
+
+			<LinearLayout
+				android:id="@+id/navSystem"
+				style="@style/Nav">
+
+				<FrameLayout style="@style/NavPill">
+
+					<ImageView
+						android:id="@+id/navIcon"
+						style="@style/NavIcon"
+						android:layout_gravity="center"
+						android:src="@drawable/ic_system" />
+				</FrameLayout>
+
+				<TextView
+					android:id="@+id/navLabel"
+					style="@style/NavLabel"
+					android:text="@string/nav_system" />
+			</LinearLayout>
+
 		</LinearLayout>
-
-
-		<LinearLayout
-			android:id="@+id/navSettings"
-			style="@style/Nav">
-
-			<FrameLayout
-				style="@style/NavPill"
-				android:background="@drawable/nav_pill_ripple"
-				android:clickable="false"
-				android:focusable="false">
-
-				<View
-					android:id="@+id/navPill"
-					android:layout_width="match_parent"
-					android:layout_height="match_parent"
-					android:background="@drawable/nav_pill"
-					android:visibility="invisible" />
-
-				<ImageView
-					android:id="@+id/navIcon"
-					style="@style/NavIcon"
-					android:layout_gravity="center"
-					android:src="@drawable/ic_settings" />
-			</FrameLayout>
-
-			<TextView
-				android:id="@+id/navLabel"
-				style="@style/NavLabel"
-				android:text="@string/nav_settings" />
-		</LinearLayout>
-
-		<LinearLayout
-			android:id="@+id/navSystem"
-			style="@style/Nav">
-
-			<FrameLayout
-				style="@style/NavPill"
-				android:background="@drawable/nav_pill_ripple"
-				android:clickable="false"
-				android:focusable="false">
-
-				<View
-					android:id="@+id/navPill"
-					android:layout_width="match_parent"
-					android:layout_height="match_parent"
-					android:background="@drawable/nav_pill"
-					android:visibility="invisible" />
-
-				<ImageView
-					android:id="@+id/navIcon"
-					style="@style/NavIcon"
-					android:layout_gravity="center"
-					android:src="@drawable/ic_system" />
-			</FrameLayout>
-
-			<TextView
-				android:id="@+id/navLabel"
-				style="@style/NavLabel"
-				android:text="@string/nav_system" />
-		</LinearLayout>
-
-	</LinearLayout>
+	</FrameLayout>
 </LinearLayout>

@@ -107,8 +107,10 @@ public class ReceiveNotifier extends BroadcastReceiver {
 		// registers for, but MiXplorer is not SAF-aware for directories and
 		// cannot actually browse a DocumentsProvider. The standard type hands
 		// this to the system file manager, which can.
+		String saved = Store.receiveUri(ctx);
+		Uri folderUri = saved != null ? Uri.parse(saved) : TailscaleDocuments.rootUri();
 		Intent browse = new Intent(Intent.ACTION_VIEW)
-				.setDataAndType(TailscaleDocuments.rootUri(),
+				.setDataAndType(folderUri,
 						DocumentsContract.Document.MIME_TYPE_DIR)
 				.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
 		PendingIntent browsePi = PendingIntent.getActivity(ctx, 2, browse,

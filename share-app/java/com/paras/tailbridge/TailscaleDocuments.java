@@ -23,18 +23,17 @@ import java.io.FileNotFoundException;
  * SecurityException and looked like a dead button. Building the provider
  * ourselves is the only way to hand out a URI we are allowed to grant.
  *
- * <p>Scope is one directory -- {@code /sdcard/Download/Tailscale} -- exposed as
- * a single root. It is not a general file browser: every id is resolved to a
- * real path inside that one directory, and anything else is rejected.
+ * <p>Scope is one directory -- {@code Download/Tailscale} by default, or
+ * whatever the user picked on the System tab -- exposed as a single root. It
+ * is not a general file browser: every id is resolved to a real path inside
+ * that one directory, and anything else is rejected.
  */
 public class TailscaleDocuments extends DocumentsProvider {
 
 	private static final String ROOT_ID = "taildrop-root";
 
-	private static File root() {
-		File downloads = android.os.Environment.getExternalStoragePublicDirectory(
-				android.os.Environment.DIRECTORY_DOWNLOADS);
-		return new File(downloads, "Tailscale");
+	private File root() {
+		return Store.receiveDir(getContext());
 	}
 
 	/** Map a document id to a path, refusing anything outside the root. */

@@ -71,8 +71,8 @@
 
 	<!-- ── bottom navigation ───────────────────────────────────── -->
 	<!-- MD3: the item is a column, and the mark behind the icon is a
-	     64x32dp pill. The item itself has no background: the ripple belongs
-	     on the pill, which is the shape being pressed. -->
+	     64x32dp pill. The pill is shared and slides, so the item itself only
+	     holds the icon and label; its background is the press layer. -->
 	<style name="Nav">
 		<item name="android:layout_width">0dp</item>
 		<item name="android:layout_weight">1</item>
@@ -81,8 +81,8 @@
 		<item name="android:gravity">center</item>
 		<item name="android:clickable">true</item>
 		<item name="android:focusable">true</item>
-		<item name="android:paddingTop">10dp</item>
-		<item name="android:paddingBottom">10dp</item>
+		<item name="android:paddingTop">8dp</item>
+		<item name="android:paddingBottom">8dp</item>
 	</style>
 
 	<style name="NavPill">
@@ -98,8 +98,9 @@
 	<style name="NavLabel">
 		<item name="android:layout_width">wrap_content</item>
 		<item name="android:layout_height">wrap_content</item>
-		<item name="android:layout_marginTop">4dp</item>
-		<item name="android:textSize">12sp</item>
+		<item name="android:layout_marginTop">5dp</item>
+		<item name="android:textSize">11.5sp</item>
+		<item name="android:letterSpacing">0.01</item>
 		<item name="android:textColor">@color/hint</item>
 		<item name="android:singleLine">true</item>
 	</style>

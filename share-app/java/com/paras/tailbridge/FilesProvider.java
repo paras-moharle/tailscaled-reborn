@@ -5,6 +5,7 @@ package com.paras.tailbridge;
 
 import android.content.ContentProvider;
 import android.content.ContentValues;
+import android.content.Context;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
@@ -42,10 +43,11 @@ public class FilesProvider extends ContentProvider {
 	/** Path segment that opens the directory itself, for the folder action. */
 	private static final String DIR = ".";
 
+	/** Set by the framework before any query, so root() can follow the user. */
+	private static Context ctx;
+
 	private static File root() {
-		File d = android.os.Environment.getExternalStoragePublicDirectory(
-				android.os.Environment.DIRECTORY_DOWNLOADS);
-		return new File(d, "Tailscale");
+		return ctx == null ? Store.defaultDir() : Store.receiveDir(ctx);
 	}
 
 	/** Reject anything that is not a plain name inside the Taildrop directory. */
@@ -102,6 +104,7 @@ public class FilesProvider extends ContentProvider {
 
 	@Override
 	public boolean onCreate() {
+		ctx = getContext();
 		return true;
 	}
 

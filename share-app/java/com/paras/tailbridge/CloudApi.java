@@ -29,9 +29,9 @@ import java.util.List;
  *
  * <p>They are reachable through the public v2 API with an access token the
  * user creates once. That token is deliberately narrow: it is an ordinary
- * API key, it can be revoked, and it is kept in this app's private storage
- * rather than in the module's root-readable directory, because nothing else
- * on the device needs it.
+ * API key, it can be revoked, and it is kept encrypted in this app's private
+ * storage rather than in the module's root-readable directory, because
+ * nothing else on the device needs it.
  *
  * <p>No token, no problem: the caller still gets the daemon-owned controls
  * (this device's DNS, the tailnet suffix) and a card explaining the one step
@@ -44,6 +44,12 @@ final class CloudApi {
 	private static final String K_TOKEN = "token";
 	/** "-" is the API's name for "the tailnet this token belongs to". */
 	private static final String TAILNET = "-";
+
+	/** The wrapping key lives in the Android keystore, not in our files. */
+	private static final String KEY_ALIAS = "tailbridge.tailnet.token";
+	private static final String TRANSFORM = "AES/GCM/NoPadding";
+	/** Marks a value written by this version; older builds stored plaintext. */
+	private static final String SEALED = "v1:";
 
 	private static final int CONNECT_TIMEOUT_MS = 12_000;
 	private static final int READ_TIMEOUT_MS = 15_000;
@@ -69,23 +75,107 @@ final class CloudApi {
 	}
 
 	// ------------------------------------------------------------- the token
+	//
+	// The key is not stored in the app's files. It is generated once inside
+	// the Android keystore (hardware-backed where the phone has a TEE), marked
+	// non-exportable, and used only to wrap the Tailscale token with
+	// AES-256-GCM. What lands in SharedPreferences is the IV and the
+	// ciphertext: another app cannot read it through the sandbox, a backup
+	// cannot restore it onto a different phone, and the key itself cannot be
+	// copied out of the keystore even by code running as this app. Removing
+	// the token deletes the ciphertext; uninstalling destroys the key with it.
 
 	private static SharedPreferences prefs(Context c) {
 		return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
 	}
 
+	private static javax.crypto.SecretKey sealingKey() throws Exception {
+		java.security.KeyStore ks = java.security.KeyStore.getInstance("AndroidKeyStore");
+		ks.load(null);
+		if (ks.containsAlias(KEY_ALIAS)) {
+			java.security.Key k = ks.getKey(KEY_ALIAS, null);
+			if (k instanceof javax.crypto.SecretKey) {
+				return (javax.crypto.SecretKey) k;
+			}
+		}
+		javax.crypto.KeyGenerator kg = javax.crypto.KeyGenerator.getInstance(
+				android.security.keystore.KeyProperties.KEY_ALGORITHM_AES,
+				"AndroidKeyStore");
+		android.security.keystore.KeyGenParameterSpec.Builder spec =
+				new android.security.keystore.KeyGenParameterSpec.Builder(KEY_ALIAS,
+						android.security.keystore.KeyProperties.PURPOSE_ENCRYPT
+								| android.security.keystore.KeyProperties.PURPOSE_DECRYPT)
+				.setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+				.setEncryptionPaddings(
+						android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
+				.setKeySize(256)
+				.setUserAuthenticationRequired(false);
+		if (android.os.Build.VERSION.SDK_INT >= 28) {
+			// The DNS page is only usable on an unlocked screen, so there is
+			// no reason to let the wrapping key work while the phone is locked.
+			spec.setUnlockedDeviceRequired(true);
+		}
+		kg.init(spec.build());
+		return kg.generateKey();
+	}
+
 	static String token(Context c) {
-		return prefs(c).getString(K_TOKEN, "");
+		String stored = prefs(c).getString(K_TOKEN, "");
+		if (stored == null || stored.isEmpty()) {
+			return "";
+		}
+		if (!stored.startsWith(SEALED)) {
+			// A token saved by an earlier build is plaintext. Seal it now and
+			// keep using it, so upgrading does not sign anyone out.
+			try {
+				save(c, stored);
+			} catch (Exception ignored) {
+				// Still return it for this session; the next save will try
+				// again. Failing here would turn a working key into "no key".
+			}
+			return stored;
+		}
+		try {
+			int split = stored.indexOf(':', SEALED.length());
+			if (split < 0) {
+				return "";
+			}
+			byte[] iv = android.util.Base64.decode(
+					stored.substring(SEALED.length(), split),
+					android.util.Base64.NO_WRAP);
+			byte[] body = android.util.Base64.decode(stored.substring(split + 1),
+					android.util.Base64.NO_WRAP);
+			javax.crypto.Cipher ci = javax.crypto.Cipher.getInstance(TRANSFORM);
+			ci.init(javax.crypto.Cipher.DECRYPT_MODE, sealingKey(),
+					new javax.crypto.spec.GCMParameterSpec(128, iv));
+			return new String(ci.doFinal(body), "UTF-8");
+		} catch (Exception e) {
+			// A ciphertext that cannot be opened is not a usable token. Do not
+			// fall back to treating it as one: that would send a blob to the
+			// API and then blame the user's key for the 401.
+			return "";
+		}
 	}
 
 	static boolean connected(Context c) {
 		return !token(c).isEmpty();
 	}
 
-	static void save(Context c, String token) {
+	static void save(Context c, String token) throws Exception {
 		// A token pasted from a terminal or a password manager can carry a
 		// newline or a stray space; those would turn a good key into a 401.
-		prefs(c).edit().putString(K_TOKEN, token.replaceAll("\\s+", "")).apply();
+		String clean = token.replaceAll("\\s+", "");
+		byte[] iv = new byte[12];
+		new java.security.SecureRandom().nextBytes(iv);
+		javax.crypto.Cipher ci = javax.crypto.Cipher.getInstance(TRANSFORM);
+		ci.init(javax.crypto.Cipher.ENCRYPT_MODE, sealingKey(),
+				new javax.crypto.spec.GCMParameterSpec(128, iv));
+		byte[] body = ci.doFinal(clean.getBytes("UTF-8"));
+		String sealed = SEALED
+				+ android.util.Base64.encodeToString(iv, android.util.Base64.NO_WRAP)
+				+ ":" + android.util.Base64.encodeToString(body,
+						android.util.Base64.NO_WRAP);
+		prefs(c).edit().putString(K_TOKEN, sealed).apply();
 	}
 
 	static void forget(Context c) {
@@ -106,7 +196,7 @@ final class CloudApi {
 	private static JSONObject request(String tok, String method, String path,
 			JSONObject body) throws CloudError {
 		if (tok == null || tok.isEmpty()) {
-			throw new CloudError(401, "no API token");
+			throw new CloudError(401, "no tailnet key stored");
 		}
 		HttpURLConnection c = null;
 		try {
@@ -186,11 +276,11 @@ final class CloudApi {
 		}
 		switch (code) {
 			case 401:
-				return "the API token was rejected (401) — create a new one";
+				return "the tailnet key was rejected (401) — create a new one";
 			case 403:
-				return "this token cannot change DNS (403) — it needs DNS write scope";
+				return "this key cannot change DNS (403) — it needs DNS write scope";
 			case 404:
-				return "not found (404) — does this token belong to a tailnet?";
+				return "not found (404) — does this key belong to a tailnet?";
 			case 429:
 				return "rate limited by Tailscale (429) — try again in a minute";
 			default:

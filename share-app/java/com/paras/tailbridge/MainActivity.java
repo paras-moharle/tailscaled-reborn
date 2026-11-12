@@ -54,6 +54,8 @@ public class MainActivity extends Activity {
 	private static final String CONSOLE_URL = "https://login.tailscale.com/admin/machines";
 	private static final String GITHUB_URL = "https://github.com/paras-moharle/tailscaled-reborn";
 	private static final int REQ_PICK = 1001;
+	/** SAF tree picker for the Taildrop receive folder. */
+	private static final int REQ_TREE = 1002;
 
 	private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -110,6 +112,8 @@ public class MainActivity extends Activity {
 	private boolean refreshAgain;
 	/** Which tab bodies are stale. Only the visible one is rebuilt. */
 	private final boolean[] dirty = { true, true, true, true };
+	/** Invalidates the tail of a tab animation when another tab is chosen. */
+	private int tabEpoch;
 	private volatile String latestVersion = "";
 	/** Whether adbd is listening for TCP connections. */
 	private volatile boolean adbWireless;
@@ -137,6 +141,13 @@ public class MainActivity extends Activity {
 		statusView = findViewById(R.id.status);
 		eyebrowView = findViewById(R.id.eyebrow);
 		versionView = findViewById(R.id.version);
+		// The log is troubleshooting material, not a daily destination, so it
+		// no longer sits in the middle of the System page. A long press on the
+		// version line is the quiet way in; the About group keeps a visible one.
+		versionView.setOnLongClickListener(v -> {
+			showLogs();
+			return true;
+		});
 		dotView = findViewById(R.id.dot);
 		dotHaloView = findViewById(R.id.dotHalo);
 		pSend = findViewById(R.id.pSend);
@@ -389,14 +400,18 @@ public class MainActivity extends Activity {
 				findViewById(R.id.scrollSettings),
 				findViewById(R.id.scrollSystem),
 		};
+		boolean moved = prev != n;
+
 		for (int i = 0; i < scrolls.length; i++) {
 			boolean on = i == n;
-			scrolls[i].setVisibility(on ? View.VISIBLE : View.GONE);
 			int iconColor = on ? Theme.onSecondaryContainer : Theme.text2;
 			int labelColor = on ? Theme.text : Theme.text2;
 			ImageView icon = (ImageView) navs[i].findViewById(R.id.navIcon);
 			if (icon != null) {
 				icon.setColorFilter(iconColor);
+				icon.animate().scaleX(on ? 1.08f : 1f).scaleY(on ? 1.08f : 1f)
+						.setDuration(on ? 300 : 200)
+						.setInterpolator(on ? Ui.SPRING : Ui.STANDARD).start();
 			}
 			TextView label = (TextView) navs[i].findViewById(R.id.navLabel);
 			if (label != null) {
@@ -404,24 +419,95 @@ public class MainActivity extends Activity {
 				label.setTypeface(null, on
 						? android.graphics.Typeface.BOLD
 						: android.graphics.Typeface.NORMAL);
-			}
-			View pill = navs[i].findViewById(R.id.navPill);
-			if (pill != null) {
-				pill.setVisibility(View.VISIBLE);
-				Ui.indicator(pill, on);
+				label.setAlpha(on ? 1f : 0.92f);
 			}
 		}
-		if (prev != n) {
-			// One short fade up. Switching tabs used to be a hard cut, which
-			// on a dark page reads as a flicker rather than a move.
-			ScrollView now = scrolls[n];
+
+		if (moved) {
+			// The old page leaves in the direction the gesture was going and
+			// the new one arrives from the opposite edge. A hard cut used to
+			// read as a flicker on a dark page; a short directional slide
+			// tells the eye where it just went.
+			final int epoch = ++tabEpoch;
+			final ScrollView old = scrolls[prev];
+			final ScrollView now = scrolls[n];
+			int dir = n > prev ? 1 : -1;
+			for (int i = 0; i < scrolls.length; i++) {
+				scrolls[i].animate().cancel();
+				if (i != n && i != prev) {
+					scrolls[i].setVisibility(View.GONE);
+					scrolls[i].setAlpha(1f);
+					scrolls[i].setTranslationX(0f);
+				}
+			}
+			old.setVisibility(View.VISIBLE);
+			old.setAlpha(1f);
+			old.setTranslationX(0f);
+			now.setVisibility(View.VISIBLE);
 			now.setAlpha(0f);
-			now.setTranslationY(dp(14));
-			now.animate().alpha(1f).translationY(0f)
-					.setDuration(260).setInterpolator(Ui.EMPHASIZED).start();
+			now.setTranslationX(dir * dp(34));
+			old.animate().alpha(0f).translationX(-dir * dp(20))
+					.setDuration(150).setInterpolator(Ui.STANDARD)
+					.withEndAction(() -> {
+						if (epoch != tabEpoch) {
+							return;
+						}
+						old.setVisibility(View.GONE);
+						old.setAlpha(1f);
+						old.setTranslationX(0f);
+					}).start();
+			now.animate().alpha(1f).translationX(0f)
+					.setStartDelay(60).setDuration(300)
+					.setInterpolator(Ui.EMPHASIZED).start();
+			moveIndicator(n, true);
+			navs[n].performHapticFeedback(
+					android.view.HapticFeedbackConstants.CLOCK_TICK);
+		} else {
+			tabEpoch++;
+			for (int i = 0; i < scrolls.length; i++) {
+				scrolls[i].animate().cancel();
+				scrolls[i].setAlpha(1f);
+				scrolls[i].setTranslationX(0f);
+				scrolls[i].setVisibility(i == n ? View.VISIBLE : View.GONE);
+			}
+			moveIndicator(n, false);
 		}
 		buildVisible();
 	}
+
+	/**
+	 * Place the one shared navigation mark under an item.
+	 *
+	 * <p>Measured after layout, because the item widths depend on the screen.
+	 * Called with {@code animate = false} on the first pass so the mark is
+	 * simply there rather than flying in from the left edge.
+	 */
+	private void moveIndicator(int n, boolean animate) {
+		View ind = findViewById(R.id.navIndicator);
+		View items = findViewById(R.id.navItems);
+		if (ind == null || items == null || n < 0 || n >= navs.length
+				|| navs[n] == null) {
+			return;
+		}
+		if (items.getWidth() == 0 || navs[n].getWidth() == 0 || ind.getWidth() == 0) {
+			// Not measured yet. render() places the mark once the bar is on
+			// screen; reposting here would spin forever while it is hidden.
+			return;
+		}
+		float center = items.getLeft() + navs[n].getLeft() + navs[n].getWidth() / 2f;
+		float x = center - ind.getWidth() / 2f;
+		if (!animate) {
+			ind.animate().cancel();
+			ind.setX(x);
+			ind.setScaleX(1f);
+			ind.setScaleY(1f);
+			ind.setAlpha(1f);
+			ind.setVisibility(View.VISIBLE);
+			return;
+		}
+		ind.animate().x(x).setDuration(380).setInterpolator(Ui.SPRING).start();
+	}
+
 
 	/**
 	 * The manifest handles this configuration itself so a rotation does not
@@ -481,38 +567,174 @@ public class MainActivity extends Activity {
 			navBar.setClipToOutline(true);
 			navBar.setElevation(dp(3));
 		}
-		int[] navIds = {R.id.navSend, R.id.navSettings, R.id.navSystem};
+		View indicator = findViewById(R.id.navIndicator);
+		if (indicator != null) {
+			indicator.setBackground(Ui.pill(this));
+		}
+		int[] navIds = {R.id.navSend, R.id.navDns, R.id.navSettings, R.id.navSystem};
 		for (int id : navIds) {
 			View nav = findViewById(id);
-			if (nav == null) {
-				continue;
-			}
-			nav.setBackground(Ui.press(this, 20f));
-			View pill = nav.findViewById(R.id.navPill);
-			if (pill != null) {
-				pill.setBackground(Ui.pill(this));
-				pill.setVisibility(View.VISIBLE);
-				pill.setAlpha(0f);
-				View holder = (View) pill.getParent();
-				if (holder != null) {
-					holder.setBackgroundColor(android.graphics.Color.TRANSPARENT);
-				}
+			if (nav != null) {
+				nav.setBackground(Ui.press(this, 22f));
 			}
 		}
 	}
 
 
 	private void openTaildropFolder() {
+		// A folder the user picked through SAF is best opened through the URI
+		// the picker handed us: the system Files app already has that grant,
+		// and it works on an SD card as well. The default folder has no such
+		// grant, so it goes through the provider this app owns.
+		String saved = Store.receiveUri(this);
 		try {
-			Intent i = new Intent(Intent.ACTION_VIEW)
-					.setDataAndType(TailscaleDocuments.rootUri(),
-							android.provider.DocumentsContract.Document.MIME_TYPE_DIR)
-					.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
-							| Intent.FLAG_ACTIVITY_NEW_TASK);
+			Intent i;
+			if (saved != null) {
+				i = new Intent(Intent.ACTION_VIEW)
+						.setDataAndType(Uri.parse(saved),
+								android.provider.DocumentsContract.Document.MIME_TYPE_DIR)
+						.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+								| Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+								| Intent.FLAG_ACTIVITY_NEW_TASK);
+			} else {
+				i = new Intent(Intent.ACTION_VIEW)
+						.setDataAndType(TailscaleDocuments.rootUri(),
+								android.provider.DocumentsContract.Document.MIME_TYPE_DIR)
+						.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+								| Intent.FLAG_ACTIVITY_NEW_TASK);
+			}
 			startActivity(i);
 		} catch (Exception e) {
-			toast(getString(R.string.taildrop_folder_sub));
+			// No document browser handled the URI. The folder is still there,
+			// so say where it is rather than only that this failed.
+			toast(Store.receivePath(this));
 		}
+	}
+
+	/** The receive folder, explained and changeable in one small sheet. */
+	private void showReceiveFolderSheet() {
+		Sheet s = Sheet.bottom(this)
+				.title(getString(R.string.receive_folder_title))
+				.message(getString(R.string.receive_folder_body) + "\n\n"
+						+ Store.receivePath(this), true);
+		s.primary(getString(R.string.receive_folder_choose),
+				this::pickReceiveFolder);
+		s.secondary(getString(R.string.receive_folder_reset),
+				this::resetReceiveFolder);
+		s.show();
+	}
+
+	private void pickReceiveFolder() {
+		Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+		i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+				| Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+				| Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+				| Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+		try {
+			startActivityForResult(i, REQ_TREE);
+		} catch (Exception e) {
+			toast(getString(R.string.receive_folder_bad));
+		}
+	}
+
+	private void adoptReceiveTree(Uri tree) {
+		String path = treeToPath(tree);
+		if (path == null) {
+			toast(getString(R.string.receive_folder_bad));
+			return;
+		}
+		try {
+			getContentResolver().takePersistableUriPermission(tree,
+					Intent.FLAG_GRANT_READ_URI_PERMISSION
+							| Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+		} catch (Exception ignored) {
+			// The path is still usable: the receiver writes as root, and the
+			// stored tree URI is only for opening the folder in Files.
+		}
+		Store.setReceive(this, path, tree.toString());
+		writeReceiveDir(path, true);
+	}
+
+	private void resetReceiveFolder() {
+		Store.clearReceive(this);
+		writeReceiveDir(Store.defaultDir().getAbsolutePath(), false);
+		toast(getString(R.string.receive_folder_reset_done));
+		dirty[3] = true;
+		buildVisible();
+	}
+
+	/**
+	 * Tell the module where to put files, then restart only the receiver.
+	 *
+	 * <p>The daemon keeps running: the destination is read by
+	 * {@code tailscaled.receive} when it starts, so a restart of that one
+	 * script is enough. The supervisor would notice the dead receiver within
+	 * thirty seconds, but waiting half a minute after choosing a folder
+	 * makes the choice look ignored.
+	 */
+	private void writeReceiveDir(final String path, final boolean announce) {
+		final String label = Store.receiveLabel(this);
+		new Thread(() -> {
+			String fail = null;
+			try {
+				if (announce) {
+					String q = shQuote(path);
+					Root.sh("mkdir -p " + q
+							+ " && printf '%s\\n' " + q
+							+ " > /data/adb/tailscale/taildrop.dir"
+							+ " && chmod 600 /data/adb/tailscale/taildrop.dir");
+				} else {
+					Root.sh("rm -f /data/adb/tailscale/taildrop.dir");
+				}
+				Root.sh("( /data/adb/tailscale/scripts/tailscaled.receive stop"
+						+ " >/dev/null 2>&1;"
+						+ " /data/adb/tailscale/scripts/tailscaled.receive run"
+						+ " </dev/null >>/data/adb/tailscale/run/runs.log 2>&1 & )");
+			} catch (Exception e) {
+				fail = e.getMessage();
+			}
+			final String why = fail;
+			ui.post(() -> {
+				if (why != null) {
+					toast(getString(R.string.receive_folder_failed, why));
+				} else if (announce) {
+					toast(getString(R.string.receive_folder_changed, label));
+				}
+				dirty[3] = true;
+				buildVisible();
+			});
+		}).start();
+	}
+
+	/** Turn a SAF tree into a filesystem path the root receiver can write. */
+	private static String treeToPath(Uri tree) {
+		try {
+			String id = android.provider.DocumentsContract.getTreeDocumentId(tree);
+			if (id == null || id.isEmpty()) {
+				return null;
+			}
+			int colon = id.indexOf(':');
+			String volume = colon < 0 ? "primary" : id.substring(0, colon);
+			String rel = colon < 0 ? id : id.substring(colon + 1);
+			String base;
+			if ("primary".equalsIgnoreCase(volume) || "emulated".equalsIgnoreCase(volume)) {
+				base = android.os.Environment.getExternalStorageDirectory()
+						.getAbsolutePath();
+			} else if ("home".equalsIgnoreCase(volume)) {
+				base = android.os.Environment.getExternalStorageDirectory()
+						.getAbsolutePath() + "/Documents";
+			} else {
+				base = "/storage/" + volume;
+			}
+			String path = new java.io.File(base, rel).getCanonicalPath();
+			return path.startsWith("/storage/") ? path : null;
+		} catch (Exception e) {
+			return null;
+		}
+	}
+
+	private static String shQuote(String s) {
+		return "'" + s.replace("'", "'\\''") + "'";
 	}
 
 	private void attachPullToRefresh(android.widget.ScrollView sv, Runnable onPull) {
@@ -520,26 +742,43 @@ public class MainActivity extends Activity {
 		final int trigger = dp(64);
 		final int travel = dp(40);
 		final float[] downY = {0f};
-		final boolean[] tracking = {false};
+		final float[] downX = {0f};
+		/** 0 = undecided, 1 = pulling down, 2 = swiping sideways. */
+		final int[] mode = {0};
 		final boolean[] armed = {false};
 		final ImageView spin = pullSpinner;
 
 		sv.setOnTouchListener((v, ev) -> {
 			switch (ev.getActionMasked()) {
 				case android.view.MotionEvent.ACTION_DOWN:
+					downX[0] = ev.getX();
 					downY[0] = ev.getY();
-					tracking[0] = sv.getScrollY() <= 0;
+					mode[0] = 0;
 					armed[0] = false;
 					return false;
 				case android.view.MotionEvent.ACTION_MOVE:
-					if (!tracking[0]) {
-						return false;
-					}
+					float dx = ev.getX() - downX[0];
 					float dy = ev.getY() - downY[0];
-					if (dy <= touchSlop) {
-						return false;
+					if (mode[0] == 0) {
+						// Whichever axis wins decides the gesture, and it is
+						// decided once: a touch that starts as a sideways
+						// swipe must not turn into a refresh halfway through.
+						if (Math.abs(dx) > touchSlop
+								&& Math.abs(dx) > Math.abs(dy) * 1.35f) {
+							mode[0] = 2;
+						} else if (dy > touchSlop && sv.getScrollY() <= 0
+								&& Math.abs(dy) > Math.abs(dx) * 1.35f) {
+							mode[0] = 1;
+						} else {
+							return false;
+						}
 					}
-					tracking[0] = true;
+					if (mode[0] == 2) {
+						// Consume the rest so the page does not scroll
+						// sideways under the finger; the move happens once,
+						// on release, with a real distance behind it.
+						return true;
+					}
 					float raw = (dy - touchSlop) * 0.5f;
 					if (raw <= 0f) {
 						return true;
@@ -563,19 +802,32 @@ public class MainActivity extends Activity {
 						spin.setAlpha(Math.min(1f, pr * 1.6f));
 						spin.setTranslationY(-dp(38) + pr * dp(38));
 						spin.setRotation(pr * 300f);
+						float s = 0.72f + pr * 0.28f;
+						spin.setScaleX(s);
+						spin.setScaleY(s);
 					}
 					return true;
 				case android.view.MotionEvent.ACTION_UP:
 				case android.view.MotionEvent.ACTION_CANCEL:
-					if (!tracking[0]) {
-						return false;
+					int gesture = mode[0];
+					mode[0] = 0;
+					if (gesture == 1) {
+						boolean fire = armed[0];
+						armed[0] = false;
+						settle(spin, v, fire);
+						if (fire) {
+							onPull.run();
+						}
+						return true;
 					}
-					boolean fire = armed[0];
-					tracking[0] = false;
 					armed[0] = false;
-					settle(spin, v, fire);
-					if (fire) {
-						onPull.run();
+					if (gesture == 2 && ev.getActionMasked()
+							== android.view.MotionEvent.ACTION_UP) {
+						float travelX = ev.getX() - downX[0];
+						float threshold = Math.max(dp(56), v.getWidth() * 0.18f);
+						if (Math.abs(travelX) > threshold) {
+							swipeTab(travelX < 0 ? 1 : -1);
+						}
 						return true;
 					}
 					return false;
@@ -583,6 +835,24 @@ public class MainActivity extends Activity {
 					return false;
 			}
 		});
+	}
+
+	/** Move one tab in the direction of a finished horizontal swipe. */
+	private void swipeTab(int direction) {
+		int next = currentTab + direction;
+		if (next < 0 || next >= navs.length) {
+			// At either end, nudge the bar so the gesture is acknowledged
+			// instead of silently doing nothing.
+			View bar = findViewById(R.id.navBar);
+			if (bar != null) {
+				bar.animate().translationX(direction * dp(6)).setDuration(90)
+						.withEndAction(() -> bar.animate().translationX(0f)
+								.setDuration(180).setInterpolator(Ui.SPRING).start())
+						.start();
+			}
+			return;
+		}
+		tab(next);
 	}
 
 	private void settle(ImageView spin, android.view.View content, boolean fired) {
@@ -696,6 +966,10 @@ public class MainActivity extends Activity {
 		((ScrollView) findViewById(R.id.scrollSend)).setFillViewport(false);
 		pSend.setGravity(Gravity.NO_GRAVITY);
 		findViewById(R.id.navBar).setVisibility(View.VISIBLE);
+		View mark = findViewById(R.id.navIndicator);
+		if (mark != null && mark.getVisibility() != View.VISIBLE) {
+			navs[currentTab].post(() -> moveIndicator(currentTab, false));
+		}
 		applyHeader(st);
 
 		peerList = Api.peersFrom(st);
@@ -1646,10 +1920,10 @@ public class MainActivity extends Activity {
 		if (picked) {
 			row.setBackground(Ui.ripple(this,
 					Ui.rounded(this, Theme.withAlpha(Theme.secondaryContainer,
-							Theme.isDark ? 0x66 : 0x99), 20f),
+							Theme.isDark ? 0x66 : 0x99), 24f),
 					Theme.withAlpha(Theme.onSurface, 0x1F), null));
 		} else {
-			row.setBackground(Ui.press(this, 20f));
+			row.setBackground(Ui.press(this, 24f));
 		}
 	}
 
@@ -1767,6 +2041,12 @@ public class MainActivity extends Activity {
 	@Override
 	protected void onActivityResult(int req, int result, Intent data) {
 		super.onActivityResult(req, result, data);
+		if (req == REQ_TREE) {
+			if (result == RESULT_OK && data != null && data.getData() != null) {
+				adoptReceiveTree(data.getData());
+			}
+			return;
+		}
 		if (req != REQ_PICK || result != RESULT_OK || data == null) {
 			return;
 		}
@@ -2211,7 +2491,11 @@ public class MainActivity extends Activity {
 	private View themeSegment() {
 		LinearLayout seg = new LinearLayout(this);
 		seg.setOrientation(LinearLayout.HORIZONTAL);
-		seg.setBackground(Ui.fieldBg(this));
+		// The track and the moving segment must describe the same shape. A
+		// 16dp rounded field holding a fully round pill left four visible
+		// corners that did not line up, which is what made the control look
+		// assembled rather than drawn.
+		seg.setBackground(Ui.outlined(this, Theme.field, Theme.hairline, 999f, 1f));
 		LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
 				ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
 		slp.leftMargin = dp(18);
@@ -2738,7 +3022,10 @@ public class MainActivity extends Activity {
 	private String providerOf(String server) {
 		String s = server.toLowerCase(java.util.Locale.ROOT);
 		if (s.contains("nextdns")) {
-			return getString(R.string.dns_provider_nextdns);
+			String id = normaliseNextDnsId(server);
+			return validNextDnsId(id)
+					? getString(R.string.dns_provider_nextdns_id, id)
+					: getString(R.string.dns_provider_nextdns);
 		}
 		if (s.contains("cloudflare") || s.startsWith("1.1.1.1")
 				|| s.startsWith("1.0.0.1")) {
@@ -2813,22 +3100,27 @@ public class MainActivity extends Activity {
 		warn.setPadding(dp(18), dp(6), dp(18), dp(4));
 		g.addView(warn);
 
+		// The field and the action are stacked rather than sharing a line.
+		// Side by side, the button was forced to 48dp while its own text and
+		// padding wanted 53dp, so the label's bottom row of pixels was
+		// clipped. Stacking also lets the token field use the full width of
+		// the card, which matters for a string this long.
 		LinearLayout entry = new LinearLayout(this);
-		entry.setOrientation(LinearLayout.HORIZONTAL);
-		entry.setGravity(Gravity.CENTER_VERTICAL);
+		entry.setOrientation(LinearLayout.VERTICAL);
 		entry.setPadding(dp(18), dp(16), dp(18), dp(18));
 
 		final EditText in = input(getString(R.string.dns_token_label),
 				getString(R.string.dns_token_hint));
 		in.setTypeface(android.graphics.Typeface.MONOSPACE);
 		in.setTextSize(13.5f);
-		entry.addView(in, new LinearLayout.LayoutParams(0, dp(48), 1f));
+		entry.addView(in, new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
 
 		final TextView connect = Ui.button(this, getString(R.string.dns_token_apply), true);
 		connect.setOnClickListener(v -> connectTailnet(in, connect));
 		LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
-				ViewGroup.LayoutParams.WRAP_CONTENT, dp(48));
-		blp.leftMargin = dp(10);
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+		blp.topMargin = dp(10);
 		entry.addView(connect, blp);
 		g.addView(entry);
 
@@ -2887,13 +3179,20 @@ public class MainActivity extends Activity {
 		new Thread(() -> {
 			// Check before storing. Saving first and failing later leaves a
 			// dead token on disk that makes the page look connected while
-			// every read errors.
-			CloudApi.save(this, token);
+			// every read errors. The save now encrypts the token with a
+			// keystore key, and that step can fail on its own.
 			String why = null;
 			try {
-				CloudApi.verify(this);
+				CloudApi.save(this, token);
 			} catch (Exception e) {
-				why = cloudMessage(e);
+				why = "secure storage: " + cloudMessage(e);
+			}
+			if (why == null) {
+				try {
+					CloudApi.verify(this);
+				} catch (Exception e) {
+					why = cloudMessage(e);
+				}
 			}
 			final String fail = why;
 			ui.post(() -> {
@@ -3061,8 +3360,9 @@ public class MainActivity extends Activity {
 		chips.setOrientation(LinearLayout.HORIZONTAL);
 		chips.setPadding(0, dp(10), 0, 0);
 		for (int i = 0; i < DNS_PRESET_LABELS.length; i++) {
+			final int labelRes = DNS_PRESET_LABELS[i];
 			final String value = DNS_PRESET_VALUES[i];
-			TextView chip = Ui.label(this, getString(DNS_PRESET_LABELS[i]),
+			TextView chip = Ui.label(this, getString(labelRes),
 					13f, Theme.onSecondaryContainer);
 			chip.setTypeface(null, android.graphics.Typeface.BOLD);
 			chip.setSingleLine(true);
@@ -3074,6 +3374,15 @@ public class MainActivity extends Activity {
 			chip.setClickable(true);
 			chip.setFocusable(true);
 			chip.setOnClickListener(v -> {
+				// NextDNS is the one provider that cannot be expressed as a
+				// literal address. Filling in a bare DoH URL with a missing
+				// configuration id would produce a nameserver that silently
+				// answers nothing, so it gets its own flow.
+				if (labelRes == R.string.dns_provider_nextdns) {
+					s.dismiss();
+					showNextDnsSheet();
+					return;
+				}
 				in.setText(value);
 				in.setSelection(value.length());
 			});
@@ -3117,6 +3426,133 @@ public class MainActivity extends Activity {
 		});
 		s.secondary(getString(android.R.string.cancel));
 		s.show();
+	}
+
+	/**
+	 * NextDNS, done the way NextDNS actually works.
+	 *
+	 * <p>Unlike Cloudflare or Quad9, a NextDNS endpoint is personal: the DoH
+	 * URL ends in a configuration id that belongs to one profile. Offering
+	 * the bare prefix as a preset produced a nameserver with no profile
+	 * behind it, so the obvious flow is the real one — paste the id, see the
+	 * URL it makes, then add that.
+	 */
+	private void showNextDnsSheet() {
+		final Sheet s = Sheet.bottom(this)
+				.title(getString(R.string.dns_nextdns_title))
+				.subtitle(getString(R.string.dns_nextdns_intro));
+
+		final EditText in = input(getString(R.string.dns_nextdns_field),
+				getString(R.string.dns_nextdns_hint));
+		in.setTypeface(android.graphics.Typeface.MONOSPACE);
+		in.setTextSize(15f);
+		LinearLayout fieldWrap = new LinearLayout(this);
+		fieldWrap.setPadding(0, dp(16), 0, 0);
+		fieldWrap.addView(in, new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+		s.add(fieldWrap);
+
+		LinearLayout plate = new LinearLayout(this);
+		plate.setOrientation(LinearLayout.VERTICAL);
+		plate.setPadding(dp(16), dp(13), dp(16), dp(13));
+		plate.setBackground(Ui.inset(this));
+		plate.setClipToOutline(true);
+		LinearLayout.LayoutParams plateLp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		plateLp.topMargin = dp(14);
+		plate.setLayoutParams(plateLp);
+
+		plate.addView(Ui.eyebrow(this,
+				getString(R.string.dns_nextdns_preview)));
+		final TextView url = Ui.label(this, "https://dns.nextdns.io/", 14f,
+				Theme.text);
+		url.setTypeface(android.graphics.Typeface.MONOSPACE,
+				android.graphics.Typeface.BOLD);
+		url.setSingleLine(true);
+		url.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+		url.setPadding(0, dp(5), 0, 0);
+		plate.addView(url);
+		s.add(plate);
+
+		TextView help = Ui.label(this, getString(R.string.dns_nextdns_where),
+				12f, Theme.hint);
+		help.setLineSpacing(dp(4), 1f);
+		LinearLayout.LayoutParams helpLp = new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		helpLp.topMargin = dp(12);
+		help.setLayoutParams(helpLp);
+		s.add(help);
+
+		TextView dash = Ui.label(this, getString(R.string.dns_nextdns_open),
+				13f, Theme.primary);
+		dash.setTypeface(null, android.graphics.Typeface.BOLD);
+		dash.setPadding(0, dp(14), 0, 0);
+		dash.setOnClickListener(v -> open("https://my.nextdns.io"));
+		s.add(dash);
+
+		final TextView err = Ui.label(this, "", 12f, Theme.error);
+		err.setVisibility(View.GONE);
+		err.setPadding(0, dp(10), 0, 0);
+		s.add(err);
+
+		final String prefix = "https://dns.nextdns.io/";
+		in.addTextChangedListener(new android.text.TextWatcher() {
+			@Override
+			public void beforeTextChanged(CharSequence c, int a, int b, int d) {
+			}
+
+			@Override
+			public void onTextChanged(CharSequence c, int a, int b, int d) {
+			}
+
+			@Override
+			public void afterTextChanged(android.text.Editable e) {
+				String id = normaliseNextDnsId(e.toString());
+				url.setText(prefix + id);
+			}
+		});
+
+		s.primaryKeep(getString(R.string.dns_nextdns_add), () -> {
+			String id = normaliseNextDnsId(in.getText().toString());
+			if (!validNextDnsId(id)) {
+				err.setText(getString(R.string.dns_nextdns_invalid));
+				err.setVisibility(View.VISIBLE);
+				Ui.pop(in);
+				return;
+			}
+			String server = prefix + id;
+			s.dismiss();
+			List<String> next = new ArrayList<>(dnsData == null
+					? new ArrayList<>() : dnsData.nameservers);
+			for (String e : next) {
+				if (e.equalsIgnoreCase(server)) {
+					toast(getString(R.string.dns_dup));
+					return;
+				}
+			}
+			next.add(server);
+			writeNameservers(next);
+		});
+		s.secondary(getString(android.R.string.cancel));
+		s.show();
+	}
+
+	/** Accept the id alone, or a URL somebody pasted from the NextDNS page. */
+	private static String normaliseNextDnsId(String raw) {
+		String v = raw == null ? "" : raw.trim();
+		int slash = v.lastIndexOf('/');
+		if (slash >= 0) {
+			v = v.substring(slash + 1);
+		}
+		int query = v.indexOf('?');
+		if (query >= 0) {
+			v = v.substring(0, query);
+		}
+		return v.toLowerCase(java.util.Locale.ROOT);
+	}
+
+	private static boolean validNextDnsId(String id) {
+		return id.matches("[a-z0-9]{4,16}");
 	}
 
 	private void showAddSearch() {
@@ -3294,21 +3730,28 @@ public class MainActivity extends Activity {
 		updateTitle = updateRow.findViewById(R.id.rowTitle);
 		updateSub = updateRow.findViewById(R.id.rowSub);
 		paintUpdateRow();
-
-		if (receivedCount > 0) {
-			action(u, R.drawable.ic_folder, getString(R.string.received_files_row,
-					receivedCount), getString(R.string.taildrop_folder_sub),
-					v -> openTaildropFolder());
-		} else {
-			value(u, R.drawable.ic_folder, getString(R.string.received_files_row_none),
-					getString(R.string.taildrop_folder_sub));
-		}
 		action(u, R.drawable.ic_history, getString(R.string.rollback), null, v -> rollback());
-		action(u, R.drawable.ic_list, getString(R.string.logs), null, v -> showLogs());
+
+		// Taildrop gets its own group: the receive folder is a real setting,
+		// not a footnote under software updates. Everything here is about
+		// where arriving files go and how to get to them.
+		LinearLayout td = group(pSystem, getString(R.string.taildrop_group));
+		action(td, R.drawable.ic_folder, getString(R.string.receive_folder),
+				getString(R.string.receive_folder_sub, Store.receiveLabel(this)),
+				v -> showReceiveFolderSheet());
+		line(td);
+		action(td, R.drawable.ic_send, getString(R.string.receive_open),
+				receivedCount > 0
+						? getString(R.string.received_files_row, receivedCount)
+						: getString(R.string.taildrop_folder_sub),
+				v -> openTaildropFolder());
 
 		buildWirelessAdb(st);
 
 		LinearLayout a = group(pSystem, getString(R.string.about));
+		action(a, R.drawable.ic_list, getString(R.string.logs),
+				getString(R.string.logs_sub), v -> showLogs());
+		line(a);
 		action(a, R.drawable.ic_globe, getString(R.string.github_link), null,
 				v -> open(GITHUB_URL));
 		note(pSystem, getString(R.string.credits_body));
@@ -3402,51 +3845,65 @@ public class MainActivity extends Activity {
 		box.addView(head);
 
 		// The address and the exact command: what you need, at a size you
-		// can read while holding the phone at arm's length.
-		box.addView(Ui.eyebrow(this, getString(R.string.adb_address_eyebrow)),
-				blockGap(16));
+		// can read while holding the phone at arm's length. The old panel
+		// set the command at 12.5sp, which is caption size for the one
+		// string this whole switch exists to give you. The copy action moved
+		// up beside the step label so the value gets the full plate width
+		// instead of being squeezed by a button on its right.
+		box.addView(adbStepHead(getString(R.string.adb_address_eyebrow), address,
+				R.string.wireless_adb_copy), blockGap(18));
 
 		LinearLayout addrRow = new LinearLayout(this);
 		addrRow.setOrientation(LinearLayout.HORIZONTAL);
 		addrRow.setGravity(Gravity.CENTER_VERTICAL);
-		addrRow.setPadding(dp(14), dp(10), dp(8), dp(10));
+		addrRow.setPadding(dp(16), dp(10), dp(16), dp(10));
 		addrRow.setBackground(Ui.fieldBg(this));
 
-		TextView addr = Ui.label(this, address, 17f, Theme.text);
+		TextView addr = Ui.label(this, address, 21f, Theme.text);
 		addr.setTypeface(android.graphics.Typeface.MONOSPACE,
 				android.graphics.Typeface.BOLD);
 		addr.setLetterSpacing(0.01f);
-		addrRow.addView(addr, new LinearLayout.LayoutParams(0,
-				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		addr.setSingleLine(true);
+		addr.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+		addrRow.addView(addr, new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+		box.addView(addrRow, blockGap(5));
 
-		View copyAddr = iconButton(R.drawable.ic_copy, Theme.accent,
-				R.string.wireless_adb_copy, v -> copy(address));
-		addrRow.addView(copyAddr, new LinearLayout.LayoutParams(dp(40), dp(40)));
-		box.addView(addrRow, blockGap(6));
+		box.addView(adbStepHead(getString(R.string.adb_command_eyebrow), command,
+				R.string.wireless_adb_copy_command), blockGap(18));
 
 		LinearLayout cmdRow = new LinearLayout(this);
 		cmdRow.setOrientation(LinearLayout.HORIZONTAL);
 		cmdRow.setGravity(Gravity.CENTER_VERTICAL);
-		cmdRow.setPadding(dp(14), dp(10), dp(8), dp(10));
+		cmdRow.setPadding(dp(16), dp(10), dp(16), dp(10));
 		cmdRow.setBackground(Ui.fieldBg(this));
 
-		TextView cmd = Ui.label(this, command, 12.5f, Theme.text2);
-		cmd.setTypeface(android.graphics.Typeface.MONOSPACE, 0);
+		TextView cmd = Ui.label(this, command, 16f, Theme.text);
+		cmd.setTypeface(android.graphics.Typeface.MONOSPACE,
+				android.graphics.Typeface.BOLD);
 		cmd.setSingleLine(true);
 		cmd.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
-		cmdRow.addView(cmd, new LinearLayout.LayoutParams(0,
-				ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-		View copyCmd = iconButton(R.drawable.ic_copy, Theme.text2,
-				R.string.wireless_adb_copy_command, v -> copy(command));
-		cmdRow.addView(copyCmd, new LinearLayout.LayoutParams(dp(40), dp(40)));
-		box.addView(cmdRow, blockGap(8));
+		cmdRow.addView(cmd, new LinearLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+		box.addView(cmdRow, blockGap(5));
 
 		TextView done = Ui.label(this, getString(R.string.adb_turn_off_hint),
 				12f, Theme.hint);
 		done.setPadding(0, dp(10), 0, 0);
 		box.addView(done);
 		return box;
+	}
+
+	private View adbStepHead(String label, final String value, int copyLabel) {
+		LinearLayout head = new LinearLayout(this);
+		head.setOrientation(LinearLayout.HORIZONTAL);
+		head.setGravity(Gravity.CENTER_VERTICAL);
+		head.addView(Ui.eyebrow(this, label), new LinearLayout.LayoutParams(
+				0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		View cp = iconButton(R.drawable.ic_copy, Theme.accent, copyLabel,
+				v -> copy(value));
+		head.addView(cp, new LinearLayout.LayoutParams(dp(36), dp(36)));
+		return head;
 	}
 
 	private LinearLayout.LayoutParams blockGap(int topDp) {
@@ -3932,7 +4389,7 @@ public class MainActivity extends Activity {
 	private void copyRow(LinearLayout g, int icon, String label, String v) {
 		line(g);
 		LinearLayout row = row();
-		row.setBackground(Ui.press(this, 18f));
+		row.setBackground(Ui.press(this, 24f));
 		row.setClickable(true);
 		row.setOnClickListener(x -> copy(v));
 		Ui.pressable(row);
@@ -4000,7 +4457,7 @@ public class MainActivity extends Activity {
 			LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(17), dp(17));
 			clp.leftMargin = dp(10);
 			row.addView(chev, clp);
-			row.setBackground(Ui.press(this, 18f));
+			row.setBackground(Ui.press(this, 24f));
 			row.setClickable(true);
 			row.setOnClickListener(l);
 			Ui.pressable(row);
@@ -4046,7 +4503,7 @@ public class MainActivity extends Activity {
 
 		if (l != null) {
 			sw.setOnCheckedChangeListener(l::on);
-			row.setBackground(Ui.press(this, 18f));
+			row.setBackground(Ui.press(this, 24f));
 			row.setClickable(true);
 			// The whole row is a bigger target, but a disabled switch must stay
 			// disabled: performClick() does not check enabled itself.

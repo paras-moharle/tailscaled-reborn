@@ -103,6 +103,20 @@ export TS_CLI="${TS_BIN_DIR}/tailscale"
 # Where Taildrop deliveries are placed so they show up in the Files app.
 export TS_TAILDROP_DIR="${TS_TAILDROP_DIR:-/sdcard/Download/Tailscale}"
 
+# The app can move the receive folder. It writes the chosen absolute path to
+# taildrop.dir when the user picks one, and removes the file to go back to the
+# default. Read here, at source time, because the receiver learns its
+# destination once when it starts. Only an absolute path is trusted: a blank
+# or mangled line must not turn the destination into "/".
+if [ -f "${TS_DIR}/taildrop.dir" ]; then
+	_ts_chosen="$(head -n 1 "${TS_DIR}/taildrop.dir" 2>/dev/null || true)"
+	case "${_ts_chosen}" in
+	/*) TS_TAILDROP_DIR="${_ts_chosen}" ;;
+	esac
+	unset _ts_chosen
+fi
+export TS_TAILDROP_DIR
+
 # Module status in the root manager
 # ---------------------------------------------------------------------------
 #

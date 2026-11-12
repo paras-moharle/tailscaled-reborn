@@ -1,3 +1,50 @@
+## v1.0.39  2026-11-12
+
+- **The tailnet key is now sealed, not merely private.** The DNS tab used to
+  keep the Tailscale access token as plain text in the app's preferences. It is
+  now encrypted with AES-256-GCM under a non-exportable key generated inside
+  the Android keystore, and only the IV and ciphertext are written to disk.
+  Other apps cannot read it through the sandbox, a backup cannot restore it onto
+  another phone, and uninstalling destroys the wrapping key. A token saved by an
+  older build is sealed in place on first read, so upgrading does not sign
+  anyone out. The setup and connected cards say where it lives, and the wording
+  is "tailnet key" throughout instead of "API access token".
+- **The connect button is no longer clipped.** It shared a row with the token
+  field, which forced it to 48dp while its own type and padding wanted 53; the
+  bottom of "Connect" was cut off. Field and button are stacked at full width,
+  and every primary button now has a real minimum height.
+- **The navigation bar moves like one control.** Four hidden pills became one
+  indicator that slides between items with a spring, the icon lifts as the mark
+  arrives, the label gains weight, and a short haptic confirms the change. Pages
+  enter from the direction of travel instead of hard-cutting, and a horizontal
+  swipe moves between tabs, with a nudge at either end. Pull-to-refresh gained
+  a scale-in indicator and the same direction-aware feel.
+- **NextDNS has its own flow.** A bare `https://dns.nextdns.io/` preset produced
+  a nameserver with no profile behind it. The chip now asks for the
+  configuration ID, normalises a pasted DoH URL down to that ID, shows the exact
+  endpoint it will add, validates it, and links to the NextDNS dashboard.
+  Existing NextDNS entries show their profile ID in the nameserver list.
+- **Wireless debugging is readable at arm's length.** The address is 21sp and
+  the command 16sp, both bold monospace on full-width plates, with the copy
+  action moved beside the step label so the value is not squeezed by a button.
+  There is a new "From your computer" step instead of one grey caption.
+- **The receive folder is a setting.** Taildrop still lands in
+  `Download/Tailscale` by default, but the System tab now shows the folder and
+  opens the system picker for any directory on this phone, including an SD card.
+  The choice is written to the module, the receiver restarts immediately, and
+  *Open receive folder* hands it to whichever file manager is installed — through
+  the SAF grant when the folder was picked, through the app's own provider for
+  the default. Arriving files are made group-readable after the move so a file
+  manager can open them, and the notification's folder action follows the same
+  rule.
+- **Corners agree.** The theme segmented control was a 16dp field holding a
+  fully round segment, which left visible mismatched corners in light mode; the
+  track is now a pill like the segment it contains. Card rows use the card's
+  24dp radius for their press layer, and the nav mark matches its ripple mask.
+- **The daemon log moved out of the way.** It is troubleshooting material, not a
+  daily destination: it now sits in About, and a long press on the header's
+  version line opens it directly.
+
 ## v1.0.38  2026-11-11
 
 - **The DNS token warning says what the token really is.** v1.0.37 called it a
