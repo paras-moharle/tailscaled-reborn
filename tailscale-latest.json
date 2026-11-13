@@ -1,11 +1,11 @@
 {
-  "version": "1.104.6",
-  "tag": "v1.104.6-android",
-  "longVersion": "1.104.6-tc54807352",
-  "gitCommit": "c54807352ae196919497b3f8fddc3cedf88368b9",
+  "version": "1.104.7",
+  "tag": "v1.104.7-android",
+  "longVersion": "1.104.7-tcbc74fe48",
+  "gitCommit": "cbc74fe48ef1b1649f69a4d9a602319427e25102",
   "assets": {
-    "arm64": "tailscale_1.104.6_arm64.tgz"
+    "arm64": "tailscale_1.104.7_arm64.tgz"
   },
-  "publishedAtEpoch": 1794407712,
+  "publishedAtEpoch": 1794580997,
   "repo": "paras-moharle/tailscaled-reborn"
 }
